@@ -151,3 +151,10 @@ hooks = [
     files = '^(\.ast-grep/|sgconfig\.yml$)'
   }
 ]
+
+[[repos]]
+repo = "https://github.com/biomejs/pre-commit"
+rev = "v2.5.15"
+hooks = [
+  { id = "biome-check" }
+]

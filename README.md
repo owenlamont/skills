@@ -36,6 +36,16 @@ gh skill install owenlamont/skills skills/<name> --agent <host> --scope user
 explicitly, since the non-interactive default is `github-copilot`. Releases are tagged,
 so `gh skill update --all` picks up new ones.
 
+## Contributing
+
+```sh
+prek install --install-hooks
+```
+
+Git does not install hooks on clone, so run that once per clone. CI runs
+`prek run --all-files` and `uv run pytest` as the `checks` job either way.
+[AGENTS.md](AGENTS.md) has the layout and toolchain.
+
 ## License
 
 MIT

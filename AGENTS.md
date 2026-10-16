@@ -6,6 +6,15 @@ Cardinal rule: **the skills are the source of truth — don't restate their cont
 or in code.** This file holds only what the skills don't: how this repo is laid out,
 built and shipped.
 
+## Setup after cloning
+
+```sh
+prek install --install-hooks
+```
+
+Git cannot install hooks on clone. CI's `checks` job runs the same hooks plus
+`uv run pytest`, so an unhooked commit still fails there.
+
 ## Layout
 
 - `skills/<name>/SKILL.md` — one skill each; optional `scripts/` (standalone PEP 723
@@ -16,8 +25,8 @@ built and shipped.
 ## Toolchain
 
 - Lint/format/type-check with `prek run --all-files` (ruff, ruff-format, ty, typos,
-  rumdl, ryl, ast-grep). `prek` only scans git-tracked files — `git add` new files
-  first.
+  rumdl, ryl, complexipy, ast-grep, zizmor, biome). `prek` only scans git-tracked
+  files — `git add` new files first.
 - Every bundled script is self-contained: it declares its own dependencies in a PEP 723
   inline-metadata block and runs via `uv run --script`. There is **no installable
   package in this repo** — the root `pyproject.toml` is a *fake* project that exists

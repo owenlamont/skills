@@ -1,4 +1,4 @@
-name: tests
+name: checks
 
 on:
   pull_request:
@@ -9,11 +9,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: tests-${{ github.ref }}
+  group: checks-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  pytest:
+  checks:
+    name: checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -24,6 +25,10 @@ jobs:
         with:
           python-version: '3.14'
           enable-cache: true
-      # The two suites under `tests/` shell out to `uv run --script`, so each bundled
+      # `no-commit-to-branch` guards local commits and would fail every push to main.
+      - run: uvx prek@0.5.5 run --all-files --show-diff-on-failure
+        env:
+          SKIP: no-commit-to-branch
+      # The suites under `tests/` shell out to `uv run --script`, so each bundled
       # script resolves its own PEP 723 dependencies from the network during the run.
       - run: uv run pytest
