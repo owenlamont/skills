@@ -225,8 +225,8 @@ budgeted. Diff contents drive the rest:
 | any TypeScript; a tsconfig, `package.json`, `biome.json`, `.oxlintrc.json` or `.vscode-test.*` change; or a TypeScript linter failure | `typescript` |
 | `import pandas` | `python-pandas` |
 | `async def` / asyncio | `python-async` |
-| raising or catching exceptions | `python-error-handling` |
-| datetimes, timezones | `python-datetime` |
+| raising or catching exceptions in Python | `python-error-handling` |
+| Python datetimes or timezones | `python-datetime` |
 | SQL, a schema or migration, or a query built in code | `sql-data-modelling` |
 | hand-rolled Python helpers, or a new Python dependency | `python-libraries` |
 | Python dependency or version changes | `python-uv-workflow` |
