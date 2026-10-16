@@ -1,12 +1,16 @@
 ---
 name: dry
-description: Find deletable Python code as a refactor input — code duplicated from itself, within a repo or across several, and hand-rolled code a maintained library already does — with a bundled detector for each and the procedure for reading what they report. Use when asked to find duplicated or copy-pasted code, plan a DRY refactor, look for logic copied between services that belongs in a shared library, decide whether a duplicate should be deleted or promoted, size a refactor before scoping it, or hunt for hand-rolled retries, grouping, counting, chunking or memoisation a library replaces.
+description: Find duplicated Python, Rust, TypeScript or JavaScript code and hand-rolled Python code a maintained library already does, with bundled detectors and guidance for reading their reports. Use when asked to find copied code, plan a DRY refactor, compare logic across services, size a refactor, or hunt for hand-rolled retries, grouping, counting, chunking or memoisation a library replaces.
 ---
 
 # DRY: duplication and library replacement
 
-Two axes, one subcommand each of the bundled `scripts/dry.py`, both Python-only
-(they parse with stdlib `ast`):
+Two axes, one subcommand each of the bundled `scripts/dry.py`:
+
+| Command | Language coverage |
+| --- | --- |
+| `dupes` | Python by default; Rust, TypeScript or JavaScript with `--language` |
+| `shapes` | Python only |
 
 - **Duplication** — `dry.py dupes` groups near-duplicate functions, methods
   and classes. Rename-insensitive, tolerates inserted statements, and scans several
@@ -15,7 +19,7 @@ Two axes, one subcommand each of the bundled `scripts/dry.py`, both Python-only
   hand-rolled shapes and names one candidate replacement for each. The candidate is a
   lead; whether to adopt that library is `python-libraries`' call.
 
-Both commands list tracked files only, skip anything under a `tests/` directory unless given
+Both commands list tracked files only, skip test paths unless given
 `--include-tests`, print their file accounting on stderr, and exit 2 on a root that
 leaves nothing to scan. Read the `unreadable` lines: a file that does not parse is
 missing from the result, not clean.
@@ -43,6 +47,7 @@ missing from the result, not clean.
 
 ```sh
 uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 <repo> [<repo> ...]
+uv run --script <skill-dir>/scripts/dry.py dupes --language rust --min-behavioural 3 <repo> [<repo> ...]
 uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 --cross-repo-only <repo> <repo> ...
 ```
 
@@ -55,7 +60,8 @@ uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 --cross-rep
   matching every other such class. It was swept on one API-service corpus, where it
   turned at 3, then held at 8% false positives on a library repo it was not tuned on.
   On a new corpus, hand-score the first twenty groups before trusting the output, and
-  move it if template-shaped matches dominate.
+  move it if template-shaped matches dominate. Rust and TypeScript thresholds are
+  untuned; hand-score the first twenty groups for those languages before using them.
 - **Expect cross-repo false positives at roughly double the within-repo rate**, from
   template-shaped matches multiplying across repos while genuine cross-repo clones stay
   rare. Measured at 31% against 12%.
@@ -84,9 +90,12 @@ uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 --cross-rep
 
 ## Delete or promote a cross-repo group
 
-Each cross-repo group is classified from the roots' `pyproject.toml` dependency edges,
+Python cross-repo groups are classified from the roots' `pyproject.toml` dependency edges,
 and a library counts only when its own repo is one of the roots — **pass the shared
 library alongside the services**, or every group reads `unrelated`:
+
+Rust, TypeScript and JavaScript groups leave `shared` empty; the `delete` and `promote`
+labels are Python-only.
 
 | label | meaning |
 | --- | --- |
