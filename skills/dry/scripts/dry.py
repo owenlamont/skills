@@ -8,6 +8,7 @@
 #     "rapidfuzz>=3.14.1",
 #     "tree-sitter>=0.26.0",
 #     "tree-sitter-javascript>=0.25.0",
+#     "tree-sitter-python>=0.25.0",
 #     "tree-sitter-rust>=0.24.2",
 #     "tree-sitter-typescript>=0.23.2",
 #     "typer>=0.26.7",
@@ -21,7 +22,7 @@
 ``dupes`` is Type-3 near-miss clone detection, cross-file and rename-insensitive, with
 each stage delegated to a library built for it:
 
-1. parse      - stdlib ``ast`` for Python, tree-sitter for Rust and JS/TS
+1. parse      - tree-sitter for ``dupes``; stdlib ``ast`` for Python ``shapes``
 2. normalise  - every fragment becomes a token sequence with identifiers and
                 literals replaced by their kind, so a rename is invisible
 3. block      - ``datasketch`` MinHash LSH proposes candidate pairs in near-linear
@@ -57,6 +58,7 @@ from packaging.utils import canonicalize_name
 from rapidfuzz.distance import Indel
 from tree_sitter import Language, Node, Parser
 import tree_sitter_javascript
+import tree_sitter_python
 import tree_sitter_rust
 import tree_sitter_typescript
 import typer
@@ -202,7 +204,7 @@ def parse_corpus(
 
 # Below this many normalised tokens ordinary idiom, such as a guard clause or a two-line
 # dict build, matches everything and the report becomes noise.
-DEFAULT_MIN_TOKENS: Final = 60
+DEFAULT_MIN_TOKENS: Final = 80
 
 DEFAULT_THRESHOLD: Final = 0.85
 
@@ -219,36 +221,6 @@ NUM_PERM: Final = 128
 # threshold, so skipping them costs no recall and removes the size-mismatch pairs
 # that dominate a naive all-pairs pass.
 LENGTH_RATIO: Final = 0.6
-
-# Annotations are excluded at the visitor level, so a Call here is real work rather
-# than a Field(...) declaration.
-_BEHAVIOURAL: Final = frozenset(
-    {
-        "Assign",
-        "AugAssign",
-        "Await",
-        "BoolOp",
-        "Call",
-        "Compare",
-        "DictComp",
-        "For",
-        "AsyncFor",
-        "GeneratorExp",
-        "If",
-        "IfExp",
-        "ListComp",
-        "Raise",
-        "Return",
-        "SetComp",
-        "Try",
-        "While",
-        "With",
-        "AsyncWith",
-        "Yield",
-    }
-)
-
-_FRAGMENT_NODES: Final = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
 
 class Group(TypedDict):
@@ -316,111 +288,8 @@ class Fragment:
         return f"{self.path}:{self.start_line}-{self.end_line} {self.name}"
 
 
-class _Normaliser(ast.NodeVisitor):
-    """Flatten an AST into a token sequence that survives renaming.
-
-    Every identifier becomes its *kind* rather than its text, so ``total`` and
-    ``acc`` are one token; every literal becomes its type. Structure is kept in
-    full: node kinds are emitted in traversal order with an explicit close token,
-    so nesting differences do not silently align.
-    """
-
-    def __init__(self) -> None:
-        self.tokens: list[str] = []
-        self.behavioural = 0
-        self.declaration_depth = 0
-
-    def generic_visit(self, node: ast.AST) -> None:
-        kind = type(node).__name__
-        self.tokens.append(kind)
-        if kind in _BEHAVIOURAL and not self.declaration_depth:
-            self.behavioural += 1
-        super().generic_visit(node)
-        self.tokens.append("/")
-
-    def visit_Name(self, node: ast.Name) -> None:
-        self.tokens.append("NAME")
-
-    def visit_Attribute(self, node: ast.Attribute) -> None:
-        self.tokens.append("ATTR")
-        self.visit(node.value)
-        self.tokens.append("/")
-
-    def visit_Constant(self, node: ast.Constant) -> None:
-        self.tokens.append(f"CONST:{type(node.value).__name__}")
-
-    def visit_arg(self, node: ast.arg) -> None:
-        self.tokens.append("ARG")
-        if node.annotation is not None:
-            self.declaration_depth += 1
-            self.visit(node.annotation)
-            self.declaration_depth -= 1
-        self.tokens.append("/")
-
-    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        """Keep a field declaration in the token stream without counting it as work.
-
-        The annotation and the default still contribute tokens, so two
-        differently-typed fields do not align; but neither the ``Field(...)`` inside
-        ``Annotated[...]`` nor the one in the default position counts as behaviour.
-        Pydantic tends to the first spelling and SQLModel to the second, and
-        suppressing only one leaves every table class looking like work.
-        """
-        self.tokens.append("AnnAssign")
-        self.declaration_depth += 1
-        self.visit(node.annotation)
-        if node.value is not None:
-            self.visit(node.value)
-        self.declaration_depth -= 1
-        self.tokens.append("/")
-
-
-type _FragmentNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
-
-
-def _normalise(node: _FragmentNode) -> _Normaliser:
-    normaliser = _Normaliser()
-    # Skip the fragment's own header: a docstring and a name are not structure, and
-    # including the name would make two identically-shaped functions look different.
-    for statement in _without_docstring(node.body):
-        normaliser.visit(statement)
-    return normaliser
-
-
-def _without_docstring(body: Sequence[ast.stmt]) -> Sequence[ast.stmt]:
-    if (
-        body
-        and isinstance(body[0], ast.Expr)
-        and isinstance(body[0].value, ast.Constant)
-        and isinstance(body[0].value.value, str)
-    ):
-        return body[1:]
-    return body
-
-
-def _fragments(
-    *, tree: ast.Module, label: str, settings: Settings
-) -> Iterator[Fragment]:
-    for node in ast.walk(tree):
-        if not isinstance(node, _FRAGMENT_NODES):
-            continue
-        normalised = _normalise(node)
-        if (
-            len(normalised.tokens) < settings.min_tokens
-            or normalised.behavioural < settings.min_behavioural
-        ):
-            continue
-        yield Fragment(
-            path=label,
-            name=node.name,
-            start_line=node.lineno,
-            end_line=node.end_lineno or node.lineno,
-            tokens=tuple(normalised.tokens),
-            behavioural=normalised.behavioural,
-        )
-
-
 FRAGMENT_KINDS: Final = {
+    LanguageName.PYTHON: frozenset({"function_definition", "class_definition"}),
     LanguageName.RUST: frozenset({"function_item", "impl_item", "trait_item"}),
     LanguageName.TYPESCRIPT: frozenset(
         {
@@ -447,6 +316,8 @@ FRAGMENT_KINDS: Final = {
     ),
 }
 _BODY_KINDS: Final = {
+    "function_definition": "body",
+    "class_definition": "body",
     "function_item": "body",
     "impl_item": "body",
     "trait_item": "body",
@@ -459,6 +330,30 @@ _BODY_KINDS: Final = {
     "arrow_function": "body",
     "function_expression": "body",
 }
+PYTHON_BEHAVIOURAL: Final = frozenset(
+    {
+        "assignment",
+        "augmented_assignment",
+        "await",
+        "boolean_operator",
+        "call",
+        "comparison_operator",
+        "dictionary_comprehension",
+        "elif_clause",
+        "for_statement",
+        "generator_expression",
+        "if_statement",
+        "conditional_expression",
+        "list_comprehension",
+        "raise_statement",
+        "return_statement",
+        "set_comprehension",
+        "try_statement",
+        "while_statement",
+        "with_statement",
+        "yield",
+    }
+)
 RUST_BEHAVIOURAL: Final = frozenset(
     {
         "call_expression",
@@ -532,7 +427,20 @@ _LITERALS: Final = frozenset(
         "undefined",
     }
 )
+PYTHON_LITERALS: Final = frozenset(
+    {
+        "string",
+        "concatenated_string",
+        "integer",
+        "float",
+        "true",
+        "false",
+        "none",
+        "ellipsis",
+    }
+)
 _GRAMMARS: Final = {
+    ".py": Language(tree_sitter_python.language()),
     ".rs": Language(tree_sitter_rust.language()),
     ".ts": Language(tree_sitter_typescript.language_typescript()),
     ".mts": Language(tree_sitter_typescript.language_typescript()),
@@ -590,21 +498,77 @@ def _behavioural_tree_node(node: Node, active: frozenset[str]) -> bool:
     )
 
 
-def _type_child(parent: Node, child: Node) -> bool:
+def _type_child(parent: Node, child: Node, language: LanguageName) -> bool:
+    if language is LanguageName.PYTHON:
+        return parent.type == "type" or (
+            parent.type == "assignment"
+            and parent.child_by_field_name("type") is not None
+        )
     return parent.type in _TYPE_NODES or (
         parent.type in {"as_expression", "satisfies_expression"}
         and child == parent.child_by_field_name("type")
     )
 
 
-def _leaf_token(node: Node, source: bytes) -> str | None:
+def _leaf_token(node: Node, source: bytes, language: LanguageName) -> str | None:
     if not node.is_named:
         return _node_text(node, source) if node.type not in _PUNCTUATION else ""
     if not node.children and node.type in _NAMES:
         return "NAME"
-    if node.type in _LITERALS:
+    if node.type in (PYTHON_LITERALS if language is LanguageName.PYTHON else _LITERALS):
         return f"LIT:{node.type}"
     return None
+
+
+def _append_leaf(
+    node: Node, source: bytes, language: LanguageName, tokens: list[str]
+) -> bool:
+    if node.type in _COMMENTS:
+        return True
+    leaf = _leaf_token(node, source, language)
+    if leaf is None:
+        return False
+    if leaf:
+        tokens.append(leaf)
+    return True
+
+
+def _python_docstring(body: Node) -> Node | None:
+    first = next(
+        (child for child in body.named_children if child.type not in _COMMENTS), None
+    )
+    if (
+        first is not None
+        and first.type == "expression_statement"
+        and len(first.named_children) == 1
+        and first.named_children[0].type in {"string", "concatenated_string"}
+    ):
+        return first
+    return None
+
+
+def _python_nonbehavioural_node(node: Node) -> bool:
+    parent = node.parent
+    if node.type == "assignment":
+        return node.child_by_field_name("type") is not None or (
+            parent is not None and parent.type == "assignment"
+        )
+    if node.type == "boolean_operator" and parent is not None:
+        return parent.type == "boolean_operator" and (
+            {child.type for child in node.children} & {"and", "or"}
+            == {child.type for child in parent.children} & {"and", "or"}
+        )
+    return False
+
+
+def _counts_as_behaviour(
+    node: Node, language: LanguageName, active: frozenset[str], in_type: bool
+) -> bool:
+    return (
+        not in_type
+        and not (language is LanguageName.PYTHON and _python_nonbehavioural_node(node))
+        and _behavioural_tree_node(node, active)
+    )
 
 
 def _normalise_tree(
@@ -612,23 +576,25 @@ def _normalise_tree(
 ) -> tuple[tuple[str, ...], int]:
     tokens: list[str] = []
     behavioural = 0
-    active = RUST_BEHAVIOURAL if language is LanguageName.RUST else SCRIPT_BEHAVIOURAL
+    active = {
+        LanguageName.PYTHON: PYTHON_BEHAVIOURAL,
+        LanguageName.RUST: RUST_BEHAVIOURAL,
+        LanguageName.TYPESCRIPT: SCRIPT_BEHAVIOURAL,
+        LanguageName.JAVASCRIPT: SCRIPT_BEHAVIOURAL,
+    }[language]
+    docstring = _python_docstring(node) if language is LanguageName.PYTHON else None
 
     def visit(current: Node, in_type: bool = False) -> None:
         nonlocal behavioural
-        kind = current.type
-        if kind in _COMMENTS:
+        if _append_leaf(current, source, language, tokens):
             return
-        leaf = _leaf_token(current, source)
-        if leaf is not None:
-            if leaf:
-                tokens.append(leaf)
-            return
-        tokens.append(kind)
-        if not in_type and _behavioural_tree_node(current, active):
+        tokens.append(current.type)
+        if _counts_as_behaviour(current, language, active, in_type):
             behavioural += 1
         for child in current.children:
-            visit(child, in_type or _type_child(current, child))
+            if current == node and child == docstring:
+                continue
+            visit(child, in_type or _type_child(current, child, language))
         tokens.append("/")
 
     visit(node)
@@ -916,20 +882,6 @@ def _collect_fragments(
     *, roots: Sequence[Path], settings: Settings, accounting: Accounting
 ) -> list[Fragment]:
     multi = len(roots) > 1
-    if settings.language is LanguageName.PYTHON:
-        return [
-            fragment
-            for root in roots
-            for source in parse_corpus(
-                root=root,
-                prefix=f"{root.name}/" if multi else "",
-                include_tests=settings.include_tests,
-                accounting=accounting,
-            )
-            for fragment in _fragments(
-                tree=source.tree, label=source.label, settings=settings
-            )
-        ]
     return [
         fragment
         for root in roots

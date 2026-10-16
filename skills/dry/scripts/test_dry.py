@@ -9,6 +9,7 @@
 #     "rapidfuzz>=3.14.1",
 #     "tree-sitter>=0.26.0",
 #     "tree-sitter-javascript>=0.25.0",
+#     "tree-sitter-python>=0.25.0",
 #     "tree-sitter-rust>=0.24.2",
 #     "tree-sitter-typescript>=0.23.2",
 #     "typer>=0.26.7",
@@ -25,6 +26,8 @@ from dry import (
     detect,
     FRAGMENT_KINDS,
     LanguageName,
+    PYTHON_BEHAVIOURAL,
+    PYTHON_LITERALS,
     Report,
     RUST_BEHAVIOURAL,
     SCRIPT_BEHAVIOURAL,
@@ -33,6 +36,7 @@ from dry import (
 import pytest
 from tree_sitter import Language
 import tree_sitter_javascript
+import tree_sitter_python
 import tree_sitter_rust
 import tree_sitter_typescript
 
@@ -49,7 +53,14 @@ SCRIPT_KINDS: Final = (
     "class C { m() { f(); } x = () => f(); } "
     "const y = function () { f(); }; const z = { p: () => f() };"
 )
+PYTHON_KINDS: Final = (
+    "def a():\n    f()\n"
+    "async def b():\n    await f()\n"
+    "@dec\ndef c():\n    f()\n"
+    "class C:\n    def m(self):\n        f()\n"
+)
 CLONE: Final = {
+    LanguageName.PYTHON: "def {name}():\n    x = read()\n    process(x)\n    save(x)\n",
     LanguageName.RUST: "fn {name}() {{ let x = read(); process(x); save(x); }}",
     LanguageName.TYPESCRIPT: (
         "function {name}() {{ const x = read(); process(x); save(x); }}"
@@ -59,9 +70,16 @@ CLONE: Final = {
     ),
 }
 SUFFIX: Final = {
+    LanguageName.PYTHON: ".py",
     LanguageName.RUST: ".rs",
     LanguageName.TYPESCRIPT: ".ts",
     LanguageName.JAVASCRIPT: ".js",
+}
+CLONE_END_LINE: Final = {
+    LanguageName.PYTHON: 4,
+    LanguageName.RUST: 1,
+    LanguageName.TYPESCRIPT: 1,
+    LanguageName.JAVASCRIPT: 1,
 }
 
 
@@ -116,6 +134,12 @@ def reported_names(report: Report) -> set[str]:
     ("language", "source", "expected"),
     [
         pytest.param(
+            LanguageName.PYTHON,
+            PYTHON_KINDS,
+            {"a", "b", "c", "C", "m"},
+            id="python sync, async, decorated and class definitions",
+        ),
+        pytest.param(
             LanguageName.RUST,
             RUST_KINDS,
             {"a", "b", "impl Foo", "c", "T"},
@@ -153,6 +177,7 @@ def test_every_fragment_kind_is_reported(
 @pytest.mark.parametrize(
     "language",
     [
+        pytest.param(LanguageName.PYTHON, id="python"),
         pytest.param(LanguageName.RUST, id="rust"),
         pytest.param(LanguageName.TYPESCRIPT, id="typescript"),
         pytest.param(LanguageName.JAVASCRIPT, id="javascript"),
@@ -174,7 +199,10 @@ def test_renamed_copy_groups_and_a_bad_parse_is_unreadable(
     report, accounting = run_detect(root, language=language, min_behavioural=3)
 
     assert [group["locations"] for group in report["groups"]] == [
-        [f"a{suffix}:1-1 first", f"b{suffix}:1-1 second"]
+        [
+            f"a{suffix}:1-{CLONE_END_LINE[language]} first",
+            f"b{suffix}:1-{CLONE_END_LINE[language]} second",
+        ]
     ]
     assert accounting.unreadable == [f"bad{suffix}"]
 
@@ -239,8 +267,91 @@ def test_cross_repo_groups_leave_shared_empty(
 
 
 @pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(
+            "class Model:\n"
+            "    a: Annotated[int, Field(gt=0)] = Field(default=1)\n"
+            "    b: int = Field(default=2)\n"
+            "    c: str = Field(default='x')\n",
+            id="annotated field block",
+        ),
+        pytest.param(
+            "class Router:\n"
+            "    def get(self, x: Annotated[int, Depends(read)]) -> Out[f()]:\n"
+            "        pass\n",
+            id="method parameter and return annotations",
+        ),
+    ],
+)
+def test_python_annotations_do_not_count_as_behaviour(
+    make_repo: MakeRepo, run_detect: Detect, source: str
+) -> None:
+    root = make_repo("repo", {"a.py": source, "b.py": source})
+
+    report, _ = run_detect(root, language=LanguageName.PYTHON, min_behavioural=1)
+
+    assert report["fragments"] == 0
+    assert report["groups"] == []
+
+
+def test_python_leading_docstring_does_not_change_tokens(
+    make_repo: MakeRepo, run_detect: Detect
+) -> None:
+    plain = CLONE[LanguageName.PYTHON].format(name="first")
+    documented = (
+        "def second():\n"
+        "    # Before the docstring.\n"
+        '    """A description."""\n'
+        "    x = read()\n"
+        "    process(x)\n"
+        "    save(x)\n"
+    )
+    root = make_repo("repo", {"a.py": plain, "b.py": documented})
+
+    report, _ = run_detect(root, language=LanguageName.PYTHON, min_behavioural=3)
+
+    assert [group["locations"] for group in report["groups"]] == [
+        ["a.py:1-4 first", "b.py:1-6 second"]
+    ]
+    assert report["groups"][0]["min_similarity"] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("source", "minimum", "expected"),
+    [
+        pytest.param(
+            "def f():\n    if a:\n        pass\n    elif b:\n        pass\n",
+            2,
+            2,
+            id="elif counts as a second branch",
+        ),
+        pytest.param(
+            "def f():\n    return a and b and c\n", 3, 0, id="boolean chain counts once"
+        ),
+        pytest.param(
+            "def f():\n    a = b = c\n", 2, 0, id="chained assignment counts once"
+        ),
+    ],
+)
+def test_python_behavioural_counts_match_ast(
+    make_repo: MakeRepo, run_detect: Detect, source: str, minimum: int, expected: int
+) -> None:
+    root = make_repo("repo", {"a.py": source, "b.py": source})
+
+    report, _ = run_detect(root, language=LanguageName.PYTHON, min_behavioural=minimum)
+
+    assert report["fragments"] == expected
+
+
+@pytest.mark.parametrize(
     ("grammars", "kinds"),
     [
+        pytest.param(
+            [tree_sitter_python.language()],
+            FRAGMENT_KINDS[LanguageName.PYTHON] | PYTHON_BEHAVIOURAL | PYTHON_LITERALS,
+            id="python",
+        ),
         pytest.param(
             [tree_sitter_rust.language()],
             FRAGMENT_KINDS[LanguageName.RUST] | RUST_BEHAVIOURAL,
