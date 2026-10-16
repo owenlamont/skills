@@ -1,0 +1,25 @@
+# Not a package: the resolution root the ty hook needs for the scripts' imports.
+[project]
+name = "skills"
+version = "0"
+requires-python = ">=3.14"
+dependencies = [
+    "datasketch>=1.6.5",
+    "gitpython>=3.1.50",
+    "markdown-it-py>=4.2.0",
+    "mdit-py-plugins>=0.6.1",
+    "orjson>=3.12.0",
+    "packaging>=26.0",
+    "py-yaml12>=0.2.0",
+    "pygments>=2.21.0",
+    "pytest>=9.0.0",
+    "rapidfuzz>=3.14.1",
+    "textstat>=0.7.13",
+    "typer>=0.26.7",
+]
+
+[tool.uv]
+package = false
+# Supply-chain cooldown: delay adopting brand-new package releases briefly
+# (also set in each script's PEP 723 block).
+exclude-newer = "1 week"

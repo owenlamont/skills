@@ -1,0 +1,32 @@
+id: subprocess-text-without-encoding
+language: python
+severity: error
+message: Replace text=True with encoding="utf-8" — Windows otherwise decodes with the locale code page.
+rule:
+  kind: keyword_argument
+  all:
+    - has:
+        field: name
+        regex: ^(text|universal_newlines)$
+    - has:
+        field: value
+        regex: ^True$
+    - inside:
+        kind: argument_list
+        inside:
+          kind: call
+          has:
+            field: function
+            regex: (^|\.)(run|Popen|check_output|check_call|call)$
+        # encoding=None is the locale default again, so it does not count.
+        not:
+          has:
+            kind: keyword_argument
+            all:
+              - has:
+                  field: name
+                  regex: ^encoding$
+              - not:
+                  has:
+                    field: value
+                    regex: ^None$
