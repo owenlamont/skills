@@ -8,7 +8,7 @@ apply; this covers the extension host, the manifest and the release.
 - **Ship a CommonJS bundle** unless `engines.vscode` is already at least 1.100, the
   release that let the Node extension host load ESM, and the extension has no `browser`
   entry. The web extension host did not gain ESM in that release, so check the release
-  notes before emitting ESM for it. Most published extensions still ship CommonJS.
+  notes before emitting ESM for it.
 - **For a CommonJS bundle, the tsconfig models CommonJS**: `module: commonjs`,
   `moduleResolution: bundler`, `isolatedModules`, and `verbatimModuleSyntax` off (see
   the skill's *Compiler configuration*).

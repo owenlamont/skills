@@ -70,8 +70,9 @@ TypeScript only checks what its `module` setting describes.
   `erasableSyntaxOnly`.** In an existing project, leave its setting for each: adopting
   one is its own change, sized by the errors it raises, and some well-maintained
   projects turn `noUncheckedIndexedAccess` off on purpose.
-  - `erasableSyntaxOnly` is exactly the static form of what Node's type stripping
-    rejects. Skip it only for a library that emits CommonJS and needs `export =`.
+  - `erasableSyntaxOnly` rejects at type-check the syntax Node's type stripping
+    rejects at run time. Skip it only for a library that emits CommonJS and needs
+    `export =`.
   - `exactOptionalPropertyTypes` is the project's call: it often fails against a
     dependency's own types rather than yours.
 - **Run `tsc --noEmit` (or `tsc -b`) as its own CI gate.** A bundler, test runner or
@@ -181,7 +182,8 @@ TypeScript only checks what its `module` setting describes.
   }
   ```
 
-  Run it as `oxlint --type-aware`. `ignoreVoid: false` is what enforces the
+  Install `oxlint` and `oxlint-tsgolint`, and run `oxlint --type-aware`.
+  `ignoreVoid: false` is what enforces the
   `void`-needs-a-handler rule above; the default accepts a bare `void p`.
 - **A project on ESLint uses typescript-eslint's type-checked config with
   `projectService`.** Where its `typescript` peer range excludes the installed
@@ -191,13 +193,13 @@ TypeScript only checks what its `module` setting describes.
 ## Testing
 
 - **Vitest for TypeScript that does not need a host to run**; `node:test` for a Node
-  package that must stay dependency-free. `node:test` module mocking and coverage are still
-  experimental there, so check their status before relying on them. Code that needs the
+  package that must stay dependency-free. `node:test` module mocking and coverage have
+  been experimental, so check their status before relying on them. Code that needs the
   VS Code API runs in the real extension host (see the reference).
 - **Run tests in terminating mode — `vitest run`, never bare `vitest` or a watch
   script.** Watch mode never exits.
-- **A passing suite is not a type-check.** Vitest, Jest and Node strip types without
-  checking them. Keep `tsc --noEmit` a separate gate. Put type-level assertions
+- **A passing suite is not a type-check.** Vitest and Node's type stripping drop types
+  without checking them. Keep `tsc --noEmit` a separate gate. Put type-level assertions
   (`expectTypeOf`) for a library's generic API in `*.test-d.ts` under
   `vitest --typecheck`, which drives the project's own `tsc`.
 - **Prefer, in order: the real dependency, a fake passed in through the public
