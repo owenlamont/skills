@@ -222,14 +222,15 @@ budgeted. Diff contents drive the rest:
 | Rust tests | `rust-testing` |
 | any Python | `python-code-style` |
 | Python tests | `python-pytest` |
+| any TypeScript; a tsconfig, `package.json`, `biome.json`, `.oxlintrc.json` or `.vscode-test.*` change; or a TypeScript linter failure | `typescript` |
 | `import pandas` | `python-pandas` |
 | `async def` / asyncio | `python-async` |
-| raising or catching exceptions | `python-error-handling` |
-| datetimes, timezones | `python-datetime` |
+| raising or catching exceptions in Python | `python-error-handling` |
+| Python datetimes or timezones | `python-datetime` |
 | SQL, a schema or migration, or a query built in code | `sql-data-modelling` |
-| hand-rolled helpers, or a new third-party dependency | `python-libraries` |
-| dependency or version changes | `python-uv-workflow` |
-| lint/format/hook config, or a linter failure | `python-lint-format` |
+| hand-rolled Python helpers, or a new Python dependency | `python-libraries` |
+| Python dependency or version changes | `python-uv-workflow` |
+| prek hook or Python lint/format config, or a linter failure outside TypeScript | `python-lint-format` |
 | a marimo or Jupyter notebook | the marimo skills, if installed |
 
 The table is a floor, not a ceiling — load anything else the catalog offers that fits.
