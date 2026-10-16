@@ -189,10 +189,11 @@ TypeScript only checks what its `module` setting describes.
   }
   ```
 
-  Install `oxlint` and `oxlint-tsgolint`, and run `oxlint --type-aware`.
-  `ignoreVoid: false` is what enforces the `void`-needs-a-handler rule above; the
-  default accepts a bare `void p`. `checkThenables` extends the rule to non-`Promise`
-  thenables, which some APIs return.
+  Install `oxlint` and `oxlint-tsgolint`, and run `oxlint --type-aware`. Without the
+  flag oxlint skips every typed rule and still exits 0, so check that the CI and hook
+  commands carry it. `ignoreVoid: false` is what enforces the `void`-needs-a-handler
+  rule above; the default accepts a bare `void p`. `checkThenables` extends the rule to
+  non-`Promise` thenables, which some APIs return.
 - **A project on ESLint uses typescript-eslint's type-checked config with
   `projectService`.** Where its `typescript` peer range excludes the installed
   compiler, use the alias recipe under *Read the toolchain*. Don't downgrade the
@@ -209,7 +210,9 @@ TypeScript only checks what its `module` setting describes.
 - **A passing suite is not a type-check.** Vitest and Node's type stripping drop types
   without checking them. Keep `tsc --noEmit` a separate gate. Put type-level assertions
   (`expectTypeOf`) for a library's generic API in `*.test-d.ts` under
-  `vitest --typecheck`, which drives the project's own `tsc`.
+  `vitest --typecheck`, which drives the project's own `tsc`. A type-test tool built on
+  the `typescript` API checks with the API compiler, not the native one, so its pass
+  says nothing about the native compiler; `tsc` stays the gate.
 - **Prefer, in order: the real dependency, a fake passed in through the public
   boundary, a spy on a real object, a network-level mock, a module mock.** Each step
   right needs a stronger reason. Mock the process, filesystem and network edges, not the

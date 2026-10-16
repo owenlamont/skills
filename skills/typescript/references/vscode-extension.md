@@ -93,8 +93,11 @@ apply; this covers the extension host, the manifest and the release.
 - **Resolve the binary deterministically**: an explicit user setting first, then the
   bundled copy, with any `PATH` lookup a documented choice. Log which binary ran and its
   version.
-- **Publish from CI with the registry's identity-based (OIDC) publishing where it is
-  offered**, for both the Marketplace and Open VSX, rather than a stored token. Check
-  each registry's current docs for the supported path before writing the workflow.
+- **Publish from CI with identity-based credentials rather than a stored token**:
+  Microsoft Entra ID for the Marketplace (`vsce publish --azure-credential`) and
+  trusted publishing for Open VSX (`ovsx publish --trusted-publishing`, with the
+  workflow granted `id-token: write`). Check each CLI's `publish --help` and the
+  registry's docs before writing the workflow; a personal access token is the
+  fallback, not the default.
 - **Mark previews with `--pre-release`**, not a SemVer suffix. Marketplace versions are
   `major.minor.patch`, and a pre-release and a stable upload need distinct versions.
