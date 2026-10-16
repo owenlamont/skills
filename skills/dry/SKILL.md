@@ -62,11 +62,14 @@ uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 --cross-rep
   matching every other such class. It was swept on one API-service corpus, where it
   turned at 3, then held at 8% false positives on a library repo it was not tuned on.
   On a new corpus, hand-score the first twenty groups before trusting the output, and
-  move it if template-shaped matches dominate. The value was tuned on Python only.
-- **On Rust, try `--min-tokens 80`.** On one single-crate CLI repo the defaults gave 14
-  removable groups out of 21, and 80 dropped only false positives — short `Option` and
-  iterator chains — leaving 14 of 17. Unchecked on a second Rust repo; 100 lost real
-  groups.
+  move it if template-shaped matches dominate.
+- **Read the false-positive rates here as a floor.** They were measured with an
+  earlier `ast` tokeniser. The tree-sitter one keeps about nine in ten of its Python
+  pairs at the defaults, and the pairs it adds run 28% false positives against 6% in
+  those it drops — mostly tests sharing a few setup lines.
+- **The `--min-tokens` default of 80 holds on Rust too.** On one single-crate CLI repo
+  it gave 14 removable groups out of 17, where 60 added four short `Option` and
+  iterator chains and 100 lost real groups. Unchecked on a second Rust repo.
 - **Expect cross-repo false positives at roughly double the within-repo rate**, from
   template-shaped matches multiplying across repos while genuine cross-repo clones stay
   rare. Measured at 31% against 12%.
