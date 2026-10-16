@@ -451,6 +451,8 @@ _GRAMMARS: Final = {
     ".cjs": Language(tree_sitter_javascript.language()),
     ".jsx": Language(tree_sitter_javascript.language()),
 }
+_INTERPOLATED: Final = frozenset({"string", "concatenated_string", "template_string"})
+_HOLES: Final = frozenset({"interpolation", "template_substitution"})
 _PUNCTUATION: Final = frozenset({"(", ")", "{", "}", "[", "]", ",", ";", ":", "."})
 _COMMENTS: Final = frozenset({"comment", "line_comment", "block_comment"})
 _TYPE_NODES: Final = frozenset(
@@ -520,6 +522,20 @@ def _leaf_token(node: Node, source: bytes, language: LanguageName) -> str | None
     return None
 
 
+def _interpolations(node: Node) -> list[Node]:
+    if node.type not in _INTERPOLATED:
+        return []
+    found: list[Node] = []
+    stack = list(reversed(node.named_children))
+    while stack:
+        child = stack.pop()
+        if child.type in _HOLES:
+            found.append(child)
+        else:
+            stack.extend(reversed(child.named_children))
+    return found
+
+
 def _append_leaf(
     node: Node, source: bytes, language: LanguageName, tokens: list[str]
 ) -> bool:
@@ -586,15 +602,15 @@ def _normalise_tree(
 
     def visit(current: Node, in_type: bool = False) -> None:
         nonlocal behavioural
-        if _append_leaf(current, source, language, tokens):
+        holes = _interpolations(current)
+        if not holes and _append_leaf(current, source, language, tokens):
             return
-        tokens.append(current.type)
+        tokens.append(f"LIT:{current.type}" if holes else current.type)
         if _counts_as_behaviour(current, language, active, in_type):
             behavioural += 1
-        for child in current.children:
-            if current == node and child == docstring:
-                continue
-            visit(child, in_type or _type_child(current, child, language))
+        for child in holes or current.children:
+            if child != docstring:
+                visit(child, in_type or _type_child(current, child, language))
         tokens.append("/")
 
     visit(node)

@@ -318,6 +318,37 @@ def test_python_leading_docstring_does_not_change_tokens(
 
 
 @pytest.mark.parametrize(
+    ("language", "source"),
+    [
+        pytest.param(
+            LanguageName.PYTHON,
+            'def f():\n    return f"{a()}{b()}" "x" f"{c()}"\n',
+            id="python f-strings",
+        ),
+        pytest.param(
+            LanguageName.TYPESCRIPT,
+            "function f() { return `${a()}${b()}${c()}`; }",
+            id="typescript template literal",
+        ),
+        pytest.param(
+            LanguageName.JAVASCRIPT,
+            "function f() { return `${a()}${b()}${c()}`; }",
+            id="javascript template literal",
+        ),
+    ],
+)
+def test_interpolated_calls_count_as_behaviour(
+    make_repo: MakeRepo, run_detect: Detect, language: LanguageName, source: str
+) -> None:
+    suffix = SUFFIX[language]
+    root = make_repo("repo", {f"a{suffix}": source, f"b{suffix}": source})
+
+    report, _ = run_detect(root, language=language, min_behavioural=4)
+
+    assert report["fragments"] == 2
+
+
+@pytest.mark.parametrize(
     ("source", "minimum", "expected"),
     [
         pytest.param(

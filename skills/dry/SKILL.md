@@ -65,8 +65,8 @@ uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 --cross-rep
   move it if template-shaped matches dominate.
 - **Read the false-positive rates here as a floor.** They were measured with an
   earlier `ast` tokeniser. The tree-sitter one keeps about nine in ten of its Python
-  pairs at the defaults, and the pairs it adds run 28% false positives against 6% in
-  those it drops — mostly tests sharing a few setup lines.
+  pairs at the defaults, and the pairs it adds run 42% false positives against 8% in
+  those it drops — mostly tests and CLI commands sharing a few setup lines.
 - **The `--min-tokens` default of 80 holds on Rust too.** On one single-crate CLI repo
   it gave 14 removable groups out of 17, where 60 added four short `Option` and
   iterator chains and 100 lost real groups. Unchecked on a second Rust repo.
