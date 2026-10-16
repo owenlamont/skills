@@ -23,6 +23,7 @@ Engineering skills for coding agents, in the
 | `rust-concurrency` | rayon, threads, channels, atomics |
 | `rust-testing` | Rust tests and coverage |
 | `sql-data-modelling` | SQL and schema design |
+| `typescript` | TypeScript: tsconfig, types, linting, tests, VS Code extensions |
 
 ## Installing
 
