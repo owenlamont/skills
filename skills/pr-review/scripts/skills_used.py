@@ -61,6 +61,8 @@ UNKNOWN_SOURCE: Final = "unknown source"
 # a hook appends after it.
 _TAIL_BYTES: Final = 1 << 20
 _SCRIPT_NAME: Final = Path(__file__).name
+# A target whose visibility `gh` cannot read is treated as public, a source as private.
+_NOT_PUBLIC: Final = frozenset({"PRIVATE", "INTERNAL"})
 
 _BASE_PREFIX: Final = "Base directory for this skill: "
 _FRONTMATTER_DELIMITER: Final = "---"
@@ -456,14 +458,14 @@ def render_table(loads: Iterable[SkillLoad]) -> str:
 
 
 @cache
-def is_public(repo: str | None) -> bool:
-    """Whether GitHub reports `repo` as public; `None` is the repo in the cwd.
+def visibility(repo: str | None) -> str | None:
+    """GitHub's `PUBLIC`, `PRIVATE` or `INTERNAL` for `repo`, or the cwd's for `None`.
 
-    Anything `gh` cannot answer reads as not public.
+    `None` when `gh` cannot answer.
     """
     gh = shutil.which("gh")
     if gh is None:
-        return False
+        return None
     target = [repo] if repo else []
     query = ["--json", "visibility", "-q", ".visibility"]
     done = subprocess.run(  # noqa: S603 - fixed argv, absolute binary, no shell
@@ -472,7 +474,7 @@ def is_public(repo: str | None) -> bool:
         check=False,
         encoding="utf-8",
     )
-    return done.returncode == 0 and done.stdout.strip() == "PUBLIC"
+    return (done.stdout.strip() or None) if done.returncode == 0 else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -544,7 +546,9 @@ def main(
         raise typer.Exit(2) from error
 
     split = publishable(
-        loads, target_is_public=is_public(repo), source_is_public=is_public
+        loads,
+        target_is_public=visibility(repo) not in _NOT_PUBLIC,
+        source_is_public=lambda source: visibility(source) == "PUBLIC",
     )
     typer.echo(render_table(split.shown))
     if split.shown:
