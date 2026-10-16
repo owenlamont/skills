@@ -1,0 +1,10 @@
+[default]
+# Tokens python-lint-format's worked example carries verbatim; `ND` stays code-span-bound.
+# A pluralised all-caps acronym: the checker reads the trailing lowercase "s" as part
+# of the word, so "PRs" is reported as a misspelling.
+extend-ignore-re = ["\\bNDAs\\b", "\\bmis-named\\b", "`ND`", "\\b[A-Z]{2,}s\\b"]
+
+# `restat` re-runs `stat` on a file; not a typo of "restart".
+[default.extend-identifiers]
+restat = "restat"
+_restat = "_restat"

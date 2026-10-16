@@ -1,0 +1,18 @@
+id: entry-point-streams-not-utf8
+language: python
+severity: error
+message: Reconfigure sys.stdin, sys.stdout and sys.stderr to UTF-8 here — Windows otherwise uses the locale code page for all three.
+rule:
+  pattern: |-
+    if __name__ == "__main__":
+        $$$BODY
+  not:
+    has:
+      stopBy: end
+      all:
+        - pattern: |-
+            for $S in (sys.stdin, sys.stdout, sys.stderr):
+                $$$LOOP
+        - has:
+            stopBy: end
+            pattern: $S.reconfigure(encoding="utf-8")

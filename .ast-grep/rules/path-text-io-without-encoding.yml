@@ -1,0 +1,31 @@
+# Windows decodes text with the locale code page (cp1252) unless told otherwise, so every
+# text read or write names its encoding. ruff's PLW1514 covers `open()`; it misses these
+# because it cannot infer a `Path` held in an untyped name or built by `/`.
+id: path-text-io-without-encoding
+language: python
+severity: error
+message: Pass encoding="utf-8" — Windows otherwise uses the locale code page.
+rule:
+  kind: call
+  all:
+    - has:
+        field: function
+        kind: attribute
+        has:
+          field: attribute
+          regex: ^(read_text|write_text)$
+    - not:
+        has:
+          field: arguments
+          has:
+            kind: keyword_argument
+            has:
+              field: name
+              regex: ^encoding$
+    # A positional encoding is the first argument of read_text, the second of write_text.
+    - not:
+        any:
+          - all:
+              - has: {field: function, has: {field: attribute, regex: ^read_text$}}
+              - has: {field: arguments, has: {nthChild: 1, not: {kind: keyword_argument}}}
+          - has: {field: arguments, has: {nthChild: 2, not: {kind: keyword_argument}}}

@@ -1,0 +1,9 @@
+# The root pyproject.toml supplies the third-party deps so ty can resolve the
+# skills' bundled scripts.
+
+[rules]
+redundant-cast = "error"
+unused-ignore-comment = "error"
+
+[environment]
+python-version = "3.14"

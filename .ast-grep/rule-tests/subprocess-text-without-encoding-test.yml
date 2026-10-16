@@ -1,0 +1,11 @@
+id: subprocess-text-without-encoding
+valid:
+  - subprocess.run(argv, encoding="utf-8")
+  - subprocess.run(argv, text=True, encoding="utf-8")
+  - subprocess.run(argv, text=False)
+  - widget.render(text=True)
+invalid:
+  - subprocess.run(argv, text=True)
+  - subprocess.Popen(argv, universal_newlines=True)
+  - run(argv, text=True)
+  - subprocess.run(argv, text=True, encoding=None)

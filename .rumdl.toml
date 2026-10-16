@@ -1,0 +1,28 @@
+line-length = 88
+# MD033: skill `description` frontmatter uses <placeholder> notation
+# (e.g. "explain dispatch at <time>"), which trips the no-inline-HTML rule.
+# MD036: docs use standalone bold lines as inline labels (e.g.
+# "**Option 1: ...**"); the auto-fix promotes them to headings, changing
+# intent and breaking heading hierarchy.
+disable = ["MD033", "MD036"]
+exclude = ["CLAUDE.md"]
+respect-gitignore = true
+
+[MD004]
+style = "dash"
+
+[MD013]
+line_length = 88
+code_blocks = false
+tables = false
+headings = true
+strict = false
+
+[MD029]
+style = "ordered"
+
+[MD035]
+style = "---"
+
+[MD046]
+style = "fenced"
