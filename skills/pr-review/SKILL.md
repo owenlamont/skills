@@ -698,8 +698,8 @@ while `gh skill install` stamps whatever release is current. So a skill sitting 
 releases back is usually just one nobody has edited since rather than one that missed an
 update, and a higher number can mean nothing more than a reinstall — a fully up-to-date
 install spans many version numbers. Record each as it reads, and never report
-one version for the whole set. Take a third-party or vendored skill's row out, since its
-provenance goes in the source column under *No skill you can cite*.
+one version for the whole set. Keep a row whose cell names another source, since it is
+still a load; a third-party skill's axis stays uncovered under *No skill you can cite*.
 
 **Keep the shape of this table unchanged, with the rows sorted by skill name**, so the
 format stays consistent enough to count mechanically across many PRs, and so two reviews
