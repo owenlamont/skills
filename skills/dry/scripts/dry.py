@@ -6,18 +6,23 @@
 #     "orjson>=3.12.0",
 #     "packaging>=26.0",
 #     "rapidfuzz>=3.14.1",
+#     "tree-sitter>=0.26.0",
+#     "tree-sitter-javascript>=0.25.0",
+#     "tree-sitter-python>=0.25.0",
+#     "tree-sitter-rust>=0.24.2",
+#     "tree-sitter-typescript>=0.23.2",
 #     "typer>=0.26.7",
 # ]
 #
 # [tool.uv]
 # exclude-newer = "1 week"
 # ///
-"""Find redundant Python code along two axes, over one or more repositories.
+"""Find duplicate code and replaceable Python shapes across repositories.
 
 ``dupes`` is Type-3 near-miss clone detection, cross-file and rename-insensitive, with
 each stage delegated to a library built for it:
 
-1. parse      - stdlib ``ast`` (CPython's own parser)
+1. parse      - tree-sitter for ``dupes``; stdlib ``ast`` for Python ``shapes``
 2. normalise  - every fragment becomes a token sequence with identifiers and
                 literals replaced by their kind, so a rename is invisible
 3. block      - ``datasketch`` MinHash LSH proposes candidate pairs in near-linear
@@ -36,6 +41,7 @@ import ast
 from collections import defaultdict
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 import io
 from pathlib import Path
 import shutil
@@ -50,11 +56,31 @@ import orjson
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from rapidfuzz.distance import Indel
+from tree_sitter import Language, Node, Parser
+import tree_sitter_javascript
+import tree_sitter_python
+import tree_sitter_rust
+import tree_sitter_typescript
 import typer
 
 
 class CorpusError(Exception):
     """The corpus cannot be listed, or a root holds nothing to scan."""
+
+
+class LanguageName(StrEnum):
+    PYTHON = "python"
+    RUST = "rust"
+    TYPESCRIPT = "typescript"
+    JAVASCRIPT = "javascript"
+
+
+_SUFFIXES: Final = {
+    LanguageName.PYTHON: (".py",),
+    LanguageName.RUST: (".rs",),
+    LanguageName.TYPESCRIPT: (".ts", ".mts", ".cts", ".tsx"),
+    LanguageName.JAVASCRIPT: (".js", ".mjs", ".cjs", ".jsx"),
+}
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -92,14 +118,15 @@ def require_distinct_names(roots: Sequence[Path]) -> None:
         raise CorpusError(message)
 
 
-def tracked_python_files(root: Path) -> list[Path]:
-    """List the repo's tracked .py files, so a stray venv cannot enter the corpus."""
+def tracked_files(root: Path, language: LanguageName) -> list[Path]:
+    """List the repo's tracked source files, so a stray venv cannot enter the corpus."""
     git = shutil.which("git")
     if git is None:
         message = "git is not on PATH, so the tracked-file list cannot be read"
         raise CorpusError(message)
     listing = subprocess.run(  # noqa: S603 - fixed argv, absolute binary, no shell
-        [git, "-C", str(root), "ls-files", "-z", "*.py"],
+        [git, "-C", str(root), "ls-files", "-z", "--"]
+        + [f"*{suffix}" for suffix in _SUFFIXES[language]],
         capture_output=True,
         encoding="utf-8",
         check=False,
@@ -110,31 +137,59 @@ def tracked_python_files(root: Path) -> list[Path]:
     return [root / name for name in listing.stdout.split("\0") if name]
 
 
-def _is_test_path(relative: Path) -> bool:
-    return "tests" in relative.parts[:-1]
+def _is_test_path(relative: Path, language: LanguageName) -> bool:
+    directories = set(relative.parts[:-1])
+    if language in {LanguageName.PYTHON, LanguageName.RUST}:
+        return "tests" in directories
+    name = relative.name.lower()
+    return (
+        bool({"test", "tests", "__tests__"} & directories)
+        or name.startswith(("test-", "test_"))
+        or ".test." in name
+        or ".spec." in name
+    )
+
+
+def eligible_files(
+    *, root: Path, language: LanguageName, include_tests: bool, accounting: Accounting
+) -> list[Path]:
+    """Return the tracked files to scan under one root, counting what was excluded.
+
+    Raises ``CorpusError`` when the root has no tracked source left to scan once tests
+    are excluded — a wrong path or a tests-only root would otherwise report zero
+    findings, which reads exactly like a clean repository.
+    """
+    paths = tracked_files(root, language)
+    eligible = [
+        path
+        for path in paths
+        if include_tests or not _is_test_path(path.relative_to(root), language)
+    ]
+    accounting.tracked += len(paths)
+    accounting.excluded_tests += len(paths) - len(eligible)
+    if not eligible:
+        suffixes = "/".join(_SUFFIXES[language])
+        detail = (
+            f"tracks no {suffixes} files" if not paths else "tracks only test files"
+        )
+        message = f"{root} {detail}, so there is nothing to scan"
+        raise CorpusError(message)
+    return eligible
 
 
 def parse_corpus(
     *, root: Path, prefix: str, include_tests: bool, accounting: Accounting
 ) -> Iterator[SourceFile]:
-    """Yield every parseable tracked file under one root, recording the rest.
+    """Yield every parseable tracked Python file under one root, recording the rest.
 
-    Raises ``CorpusError`` when the root has no tracked Python left to scan once tests
-    are excluded — a wrong path or a tests-only root would otherwise report zero
-    findings, which reads exactly like a clean repository.
+    Raises ``CorpusError`` when the root leaves nothing to scan.
     """
-    paths = tracked_python_files(root)
-    eligible = [
-        path
-        for path in paths
-        if include_tests or not _is_test_path(path.relative_to(root))
-    ]
-    accounting.tracked += len(paths)
-    accounting.excluded_tests += len(paths) - len(eligible)
-    if not eligible:
-        detail = "tracks no .py files" if not paths else "tracks only test files"
-        message = f"{root} {detail}, so there is nothing to scan"
-        raise CorpusError(message)
+    eligible = eligible_files(
+        root=root,
+        language=LanguageName.PYTHON,
+        include_tests=include_tests,
+        accounting=accounting,
+    )
     for path in eligible:
         label = prefix + str(path.relative_to(root))
         try:
@@ -149,7 +204,7 @@ def parse_corpus(
 
 # Below this many normalised tokens ordinary idiom, such as a guard clause or a two-line
 # dict build, matches everything and the report becomes noise.
-DEFAULT_MIN_TOKENS: Final = 60
+DEFAULT_MIN_TOKENS: Final = 80
 
 DEFAULT_THRESHOLD: Final = 0.85
 
@@ -166,36 +221,6 @@ NUM_PERM: Final = 128
 # threshold, so skipping them costs no recall and removes the size-mismatch pairs
 # that dominate a naive all-pairs pass.
 LENGTH_RATIO: Final = 0.6
-
-# Annotations are excluded at the visitor level, so a Call here is real work rather
-# than a Field(...) declaration.
-_BEHAVIOURAL: Final = frozenset(
-    {
-        "Assign",
-        "AugAssign",
-        "Await",
-        "BoolOp",
-        "Call",
-        "Compare",
-        "DictComp",
-        "For",
-        "AsyncFor",
-        "GeneratorExp",
-        "If",
-        "IfExp",
-        "ListComp",
-        "Raise",
-        "Return",
-        "SetComp",
-        "Try",
-        "While",
-        "With",
-        "AsyncWith",
-        "Yield",
-    }
-)
-
-_FRAGMENT_NODES: Final = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
 
 class Group(TypedDict):
@@ -227,6 +252,7 @@ class Settings:
     include_tests: bool
     min_behavioural: int
     min_tokens: int
+    language: LanguageName = LanguageName.PYTHON
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -262,107 +288,431 @@ class Fragment:
         return f"{self.path}:{self.start_line}-{self.end_line} {self.name}"
 
 
-class _Normaliser(ast.NodeVisitor):
-    """Flatten an AST into a token sequence that survives renaming.
+FRAGMENT_KINDS: Final = {
+    LanguageName.PYTHON: frozenset({"function_definition", "class_definition"}),
+    LanguageName.RUST: frozenset({"function_item", "impl_item", "trait_item"}),
+    LanguageName.TYPESCRIPT: frozenset(
+        {
+            "function_declaration",
+            "generator_function_declaration",
+            "method_definition",
+            "class_declaration",
+            "abstract_class_declaration",
+            "class",
+            "arrow_function",
+            "function_expression",
+        }
+    ),
+    LanguageName.JAVASCRIPT: frozenset(
+        {
+            "function_declaration",
+            "generator_function_declaration",
+            "method_definition",
+            "class_declaration",
+            "class",
+            "arrow_function",
+            "function_expression",
+        }
+    ),
+}
+_BODY_KINDS: Final = {
+    "function_definition": "body",
+    "class_definition": "body",
+    "function_item": "body",
+    "impl_item": "body",
+    "trait_item": "body",
+    "function_declaration": "body",
+    "generator_function_declaration": "body",
+    "method_definition": "body",
+    "class_declaration": "body",
+    "abstract_class_declaration": "body",
+    "class": "body",
+    "arrow_function": "body",
+    "function_expression": "body",
+}
+PYTHON_BEHAVIOURAL: Final = frozenset(
+    {
+        "assignment",
+        "augmented_assignment",
+        "await",
+        "boolean_operator",
+        "call",
+        "comparison_operator",
+        "dictionary_comprehension",
+        "elif_clause",
+        "for_statement",
+        "generator_expression",
+        "if_statement",
+        "conditional_expression",
+        "list_comprehension",
+        "raise_statement",
+        "return_statement",
+        "set_comprehension",
+        "try_statement",
+        "while_statement",
+        "with_statement",
+        "yield",
+    }
+)
+RUST_BEHAVIOURAL: Final = frozenset(
+    {
+        "call_expression",
+        "macro_invocation",
+        "let_declaration",
+        "assignment_expression",
+        "compound_assignment_expr",
+        "if_expression",
+        "match_expression",
+        "for_expression",
+        "while_expression",
+        "loop_expression",
+        "return_expression",
+        "try_expression",
+        "await_expression",
+        "closure_expression",
+    }
+)
+SCRIPT_BEHAVIOURAL: Final = frozenset(
+    {
+        "call_expression",
+        "new_expression",
+        "lexical_declaration",
+        "variable_declaration",
+        "assignment_expression",
+        "augmented_assignment_expression",
+        "if_statement",
+        "switch_statement",
+        "for_statement",
+        "for_in_statement",
+        "while_statement",
+        "do_statement",
+        "try_statement",
+        "throw_statement",
+        "return_statement",
+        "await_expression",
+        "ternary_expression",
+        "yield_expression",
+    }
+)
+_NAMES: Final = frozenset(
+    {
+        "identifier",
+        "field_identifier",
+        "type_identifier",
+        "property_identifier",
+        "shorthand_property_identifier",
+        "private_property_identifier",
+        "primitive_type",
+        "this",
+        "self",
+        "self_type",
+        "lifetime",
+    }
+)
+_LITERALS: Final = frozenset(
+    {
+        "string",
+        "string_literal",
+        "raw_string_literal",
+        "char_literal",
+        "number",
+        "integer_literal",
+        "float_literal",
+        "boolean",
+        "true",
+        "false",
+        "template_string",
+        "regex",
+        "null",
+        "undefined",
+    }
+)
+PYTHON_LITERALS: Final = frozenset(
+    {
+        "string",
+        "concatenated_string",
+        "integer",
+        "float",
+        "true",
+        "false",
+        "none",
+        "ellipsis",
+    }
+)
+_GRAMMARS: Final = {
+    ".py": Language(tree_sitter_python.language()),
+    ".rs": Language(tree_sitter_rust.language()),
+    ".ts": Language(tree_sitter_typescript.language_typescript()),
+    ".mts": Language(tree_sitter_typescript.language_typescript()),
+    ".cts": Language(tree_sitter_typescript.language_typescript()),
+    ".tsx": Language(tree_sitter_typescript.language_tsx()),
+    ".js": Language(tree_sitter_javascript.language()),
+    ".mjs": Language(tree_sitter_javascript.language()),
+    ".cjs": Language(tree_sitter_javascript.language()),
+    ".jsx": Language(tree_sitter_javascript.language()),
+}
+_INTERPOLATED: Final = frozenset({"string", "concatenated_string", "template_string"})
+_HOLES: Final = frozenset({"interpolation", "template_substitution"})
+_PUNCTUATION: Final = frozenset({"(", ")", "{", "}", "[", "]", ",", ";", ":", "."})
+_COMMENTS: Final = frozenset({"comment", "line_comment", "block_comment"})
+_TYPE_NODES: Final = frozenset(
+    {
+        "type_annotation",
+        "type_arguments",
+        "type_parameters",
+        "generic_type",
+        "type_identifier",
+        "where_clause",
+        "generic_type_with_turbofish",
+    }
+)
 
-    Every identifier becomes its *kind* rather than its text, so ``total`` and
-    ``acc`` are one token; every literal becomes its type. Structure is kept in
-    full: node kinds are emitted in traversal order with an explicit close token,
-    so nesting differences do not silently align.
-    """
 
-    def __init__(self) -> None:
-        self.tokens: list[str] = []
-        self.behavioural = 0
-        self.declaration_depth = 0
-
-    def generic_visit(self, node: ast.AST) -> None:
-        kind = type(node).__name__
-        self.tokens.append(kind)
-        if kind in _BEHAVIOURAL and not self.declaration_depth:
-            self.behavioural += 1
-        super().generic_visit(node)
-        self.tokens.append("/")
-
-    def visit_Name(self, node: ast.Name) -> None:
-        self.tokens.append("NAME")
-
-    def visit_Attribute(self, node: ast.Attribute) -> None:
-        self.tokens.append("ATTR")
-        self.visit(node.value)
-        self.tokens.append("/")
-
-    def visit_Constant(self, node: ast.Constant) -> None:
-        self.tokens.append(f"CONST:{type(node.value).__name__}")
-
-    def visit_arg(self, node: ast.arg) -> None:
-        self.tokens.append("ARG")
-        if node.annotation is not None:
-            self.declaration_depth += 1
-            self.visit(node.annotation)
-            self.declaration_depth -= 1
-        self.tokens.append("/")
-
-    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        """Keep a field declaration in the token stream without counting it as work.
-
-        The annotation and the default still contribute tokens, so two
-        differently-typed fields do not align; but neither the ``Field(...)`` inside
-        ``Annotated[...]`` nor the one in the default position counts as behaviour.
-        Pydantic tends to the first spelling and SQLModel to the second, and
-        suppressing only one leaves every table class looking like work.
-        """
-        self.tokens.append("AnnAssign")
-        self.declaration_depth += 1
-        self.visit(node.annotation)
-        if node.value is not None:
-            self.visit(node.value)
-        self.declaration_depth -= 1
-        self.tokens.append("/")
+def _parser(path: Path) -> Parser:
+    return Parser(_GRAMMARS[path.suffix])
 
 
-type _FragmentNode = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+def _node_text(node: Node, source: bytes) -> str:
+    return source[node.start_byte : node.end_byte].decode("utf-8")
 
 
-def _normalise(node: _FragmentNode) -> _Normaliser:
-    normaliser = _Normaliser()
-    # Skip the fragment's own header: a docstring and a name are not structure, and
-    # including the name would make two identically-shaped functions look different.
-    for statement in _without_docstring(node.body):
-        normaliser.visit(statement)
-    return normaliser
-
-
-def _without_docstring(body: Sequence[ast.stmt]) -> Sequence[ast.stmt]:
-    if (
-        body
-        and isinstance(body[0], ast.Expr)
-        and isinstance(body[0].value, ast.Constant)
-        and isinstance(body[0].value.value, str)
-    ):
-        return body[1:]
-    return body
-
-
-def _fragments(
-    *, tree: ast.Module, label: str, settings: Settings
-) -> Iterator[Fragment]:
-    for node in ast.walk(tree):
-        if not isinstance(node, _FRAGMENT_NODES):
-            continue
-        normalised = _normalise(node)
-        if (
-            len(normalised.tokens) < settings.min_tokens
-            or normalised.behavioural < settings.min_behavioural
+def _under_test_cfg(node: Node, source: bytes) -> bool:
+    current: Node | None = node
+    while current is not None:
+        sibling = current.prev_named_sibling
+        while sibling is not None and (
+            sibling.type == "attribute_item" or sibling.type in _COMMENTS
         ):
+            if "cfg(test)" in _node_text(sibling, source).replace(" ", ""):
+                return True
+            sibling = sibling.prev_named_sibling
+        current = current.parent
+    return False
+
+
+def _behavioural_tree_node(node: Node, active: frozenset[str]) -> bool:
+    return node.type in active or (
+        node.type == "binary_expression"
+        and any(
+            child.type in {"==", "!=", "<", ">", "<=", ">=", "&&", "||"}
+            for child in node.children
+        )
+    )
+
+
+def _type_child(parent: Node, child: Node, language: LanguageName) -> bool:
+    if language is LanguageName.PYTHON:
+        return parent.type == "type" or (
+            parent.type == "assignment"
+            and parent.child_by_field_name("type") is not None
+        )
+    return parent.type in _TYPE_NODES or (
+        parent.type in {"as_expression", "satisfies_expression"}
+        and child == parent.child_by_field_name("type")
+    )
+
+
+def _leaf_token(node: Node, source: bytes, language: LanguageName) -> str | None:
+    if not node.is_named:
+        return _node_text(node, source) if node.type not in _PUNCTUATION else ""
+    if not node.children and node.type in _NAMES:
+        return "NAME"
+    if node.type in (PYTHON_LITERALS if language is LanguageName.PYTHON else _LITERALS):
+        return f"LIT:{node.type}"
+    return None
+
+
+def _interpolations(node: Node) -> list[Node]:
+    if node.type not in _INTERPOLATED:
+        return []
+    found: list[Node] = []
+    stack = list(reversed(node.named_children))
+    while stack:
+        child = stack.pop()
+        if child.type in _HOLES:
+            found.append(child)
+        else:
+            stack.extend(reversed(child.named_children))
+    return found
+
+
+def _append_leaf(
+    node: Node, source: bytes, language: LanguageName, tokens: list[str]
+) -> bool:
+    if node.type in _COMMENTS:
+        return True
+    leaf = _leaf_token(node, source, language)
+    if leaf is None:
+        return False
+    if leaf:
+        tokens.append(leaf)
+    return True
+
+
+def _python_docstring(body: Node) -> Node | None:
+    first = next(
+        (child for child in body.named_children if child.type not in _COMMENTS), None
+    )
+    if (
+        first is not None
+        and first.type == "expression_statement"
+        and len(first.named_children) == 1
+        and first.named_children[0].type in {"string", "concatenated_string"}
+    ):
+        return first
+    return None
+
+
+def _python_nonbehavioural_node(node: Node) -> bool:
+    parent = node.parent
+    if node.type == "assignment":
+        return node.child_by_field_name("type") is not None or (
+            parent is not None and parent.type == "assignment"
+        )
+    if node.type == "boolean_operator" and parent is not None:
+        return parent.type == "boolean_operator" and (
+            {child.type for child in node.children} & {"and", "or"}
+            == {child.type for child in parent.children} & {"and", "or"}
+        )
+    return False
+
+
+def _counts_as_behaviour(
+    node: Node, language: LanguageName, active: frozenset[str], in_type: bool
+) -> bool:
+    return (
+        not in_type
+        and not (language is LanguageName.PYTHON and _python_nonbehavioural_node(node))
+        and _behavioural_tree_node(node, active)
+    )
+
+
+def _normalise_tree(
+    node: Node, source: bytes, language: LanguageName
+) -> tuple[tuple[str, ...], int]:
+    tokens: list[str] = []
+    behavioural = 0
+    active = {
+        LanguageName.PYTHON: PYTHON_BEHAVIOURAL,
+        LanguageName.RUST: RUST_BEHAVIOURAL,
+        LanguageName.TYPESCRIPT: SCRIPT_BEHAVIOURAL,
+        LanguageName.JAVASCRIPT: SCRIPT_BEHAVIOURAL,
+    }[language]
+    docstring = _python_docstring(node) if language is LanguageName.PYTHON else None
+
+    def visit(current: Node, in_type: bool = False) -> None:
+        nonlocal behavioural
+        holes = _interpolations(current)
+        if not holes and _append_leaf(current, source, language, tokens):
+            return
+        tokens.append(f"LIT:{current.type}" if holes else current.type)
+        if _counts_as_behaviour(current, language, active, in_type):
+            behavioural += 1
+        for child in holes or current.children:
+            if child != docstring:
+                visit(child, in_type or _type_child(current, child, language))
+        tokens.append("/")
+
+    visit(node)
+    return tuple(tokens), behavioural
+
+
+def _tree_fragment_name(node: Node, source: bytes) -> str | None:
+    if node.type == "impl_item":
+        header = _node_text(node, source).split("{", 1)[0].removeprefix("impl")
+        return "impl " + header.strip()
+    parent = node.parent
+    if node.type in {"arrow_function", "function_expression"}:
+        if parent is None or parent.type not in {
+            "variable_declarator",
+            "pair",
+            "public_field_definition",
+            "field_definition",
+        }:
+            return None
+        name_node = (
+            parent.child_by_field_name("name")
+            or parent.child_by_field_name("key")
+            or parent.child_by_field_name("property")
+        )
+    else:
+        name_node = node.child_by_field_name("name")
+    return _node_text(name_node, source) if name_node is not None else node.type
+
+
+def _tree_fragment(
+    *, node: Node, source: bytes, label: str, language: LanguageName, settings: Settings
+) -> Fragment | None:
+    if node.type not in FRAGMENT_KINDS[language]:
+        return None
+    if (
+        language is LanguageName.RUST
+        and not settings.include_tests
+        and _under_test_cfg(node, source)
+    ):
+        return None
+    name = _tree_fragment_name(node, source)
+    if name is None:
+        return None
+    body = node.child_by_field_name(_BODY_KINDS[node.type])
+    if body is None:
+        return None
+    tokens, behavioural = _normalise_tree(body, source, language)
+    if len(tokens) < settings.min_tokens or behavioural < settings.min_behavioural:
+        return None
+    return Fragment(
+        path=label,
+        name=name,
+        start_line=source.count(b"\n", 0, node.start_byte) + 1,
+        end_line=source.count(b"\n", 0, max(node.start_byte, node.end_byte - 1)) + 1,
+        tokens=tokens,
+        behavioural=behavioural,
+    )
+
+
+def _tree_fragments(
+    *, tree: Node, source: bytes, label: str, language: LanguageName, settings: Settings
+) -> Iterator[Fragment]:
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        stack.extend(reversed(node.named_children))
+        fragment = _tree_fragment(
+            node=node, source=source, label=label, language=language, settings=settings
+        )
+        if fragment is not None:
+            yield fragment
+
+
+def _language_fragments(
+    *,
+    root: Path,
+    prefix: str,
+    language: LanguageName,
+    settings: Settings,
+    accounting: Accounting,
+) -> Iterator[Fragment]:
+    eligible = eligible_files(
+        root=root,
+        language=language,
+        include_tests=settings.include_tests,
+        accounting=accounting,
+    )
+    for path in eligible:
+        label = prefix + str(path.relative_to(root))
+        try:
+            source = path.read_bytes()
+            source.decode("utf-8")
+            tree = _parser(path).parse(source).root_node
+            if tree.has_error:
+                accounting.unreadable.append(label)
+                continue
+        except UnicodeDecodeError, OSError:
+            accounting.unreadable.append(label)
             continue
-        yield Fragment(
-            path=label,
-            name=node.name,
-            start_line=node.lineno,
-            end_line=node.end_lineno or node.lineno,
-            tokens=tuple(normalised.tokens),
-            behavioural=normalised.behavioural,
+        accounting.parsed += 1
+        yield from _tree_fragments(
+            tree=tree, source=source, label=label, language=language, settings=settings
         )
 
 
@@ -510,6 +860,7 @@ def _group(
     members: set[int],
     fragments: Sequence[Fragment],
     pairs: Mapping[tuple[int, int], float],
+    multi: bool,
     dependencies: _Dependencies | None,
 ) -> Group:
     ordered = sorted(
@@ -519,9 +870,7 @@ def _group(
         s for (left, right), s in pairs.items() if left in members and right in members
     ]
     repos = (
-        sorted({fragments[i].path.split("/", 1)[0] for i in ordered})
-        if dependencies
-        else []
+        sorted({fragments[i].path.split("/", 1)[0] for i in ordered}) if multi else []
     )
     cross_repo = len(repos) > 1
     return Group(
@@ -545,6 +894,23 @@ def _group(
     )
 
 
+def _collect_fragments(
+    *, roots: Sequence[Path], settings: Settings, accounting: Accounting
+) -> list[Fragment]:
+    multi = len(roots) > 1
+    return [
+        fragment
+        for root in roots
+        for fragment in _language_fragments(
+            root=root,
+            prefix=f"{root.name}/" if multi else "",
+            language=settings.language,
+            settings=settings,
+            accounting=accounting,
+        )
+    ]
+
+
 def detect(
     *, roots: Sequence[Path], settings: Settings, accounting: Accounting
 ) -> Report:
@@ -561,19 +927,9 @@ def detect(
     started = time.perf_counter()
     require_distinct_names(roots)
     multi = len(roots) > 1
-    fragments = [
-        fragment
-        for root in roots
-        for source in parse_corpus(
-            root=root,
-            prefix=f"{root.name}/" if multi else "",
-            include_tests=settings.include_tests,
-            accounting=accounting,
-        )
-        for fragment in _fragments(
-            tree=source.tree, label=source.label, settings=settings
-        )
-    ]
+    fragments = _collect_fragments(
+        roots=roots, settings=settings, accounting=accounting
+    )
     parsed_at = time.perf_counter()
     candidates = _candidate_pairs(fragments)
     blocked_at = time.perf_counter()
@@ -582,10 +938,18 @@ def detect(
     )
     scored_at = time.perf_counter()
 
-    dependencies = _Dependencies.read(roots) if multi else None
+    dependencies = (
+        _Dependencies.read(roots)
+        if multi and settings.language is LanguageName.PYTHON
+        else None
+    )
     groups = [
         _group(
-            members=members, fragments=fragments, pairs=pairs, dependencies=dependencies
+            members=members,
+            fragments=fragments,
+            pairs=pairs,
+            multi=multi,
+            dependencies=dependencies,
         )
         for members in _clusters(pairs)
     ]
@@ -902,6 +1266,9 @@ def dupes(
             "work from declaration blocks, and where it turns depends on the corpus."
         ),
     ],
+    language: Annotated[
+        LanguageName, typer.Option(help="Source language to scan.")
+    ] = LanguageName.PYTHON,
     min_tokens: Annotated[
         int, typer.Option(help="Normalised tokens a fragment needs to be reported.")
     ] = DEFAULT_MIN_TOKENS,
@@ -921,12 +1288,13 @@ def dupes(
         bool, typer.Option("--json", help="Emit the full report as JSON.")
     ] = False,
 ) -> None:
-    """Find near-duplicate functions and classes across Python repositories."""
+    """Find near-duplicate functions and classes across repositories."""
     settings = Settings(
         threshold=threshold,
         include_tests=include_tests,
         min_behavioural=min_behavioural,
         min_tokens=min_tokens,
+        language=language,
     )
     accounting = Accounting()
     try:

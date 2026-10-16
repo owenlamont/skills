@@ -1,12 +1,16 @@
 ---
 name: dry
-description: Find deletable Python code as a refactor input — code duplicated from itself, within a repo or across several, and hand-rolled code a maintained library already does — with a bundled detector for each and the procedure for reading what they report. Use when asked to find duplicated or copy-pasted code, plan a DRY refactor, look for logic copied between services that belongs in a shared library, decide whether a duplicate should be deleted or promoted, size a refactor before scoping it, or hunt for hand-rolled retries, grouping, counting, chunking or memoisation a library replaces.
+description: Find deletable code as a refactor input — Python, Rust, TypeScript or JavaScript duplicated from itself, within a repo or across several, and hand-rolled Python a maintained library already does — with a bundled detector for each and the procedure for reading what they report. Use when asked to find duplicated or copy-pasted code, plan a DRY refactor, look for logic copied between services that belongs in a shared library, decide whether a duplicate should be deleted or promoted, size a refactor before scoping it, or hunt for hand-rolled retries, grouping, counting, chunking or memoisation a library replaces.
 ---
 
 # DRY: duplication and library replacement
 
-Two axes, one subcommand each of the bundled `scripts/dry.py`, both Python-only
-(they parse with stdlib `ast`):
+Two axes, one subcommand each of the bundled `scripts/dry.py`:
+
+| Command | Language coverage |
+| --- | --- |
+| `dupes` | Python by default; Rust, TypeScript or JavaScript with `--language` |
+| `shapes` | Python only |
 
 - **Duplication** — `dry.py dupes` groups near-duplicate functions, methods
   and classes. Rename-insensitive, tolerates inserted statements, and scans several
@@ -15,8 +19,10 @@ Two axes, one subcommand each of the bundled `scripts/dry.py`, both Python-only
   hand-rolled shapes and names one candidate replacement for each. The candidate is a
   lead; whether to adopt that library is `python-libraries`' call.
 
-Both commands list tracked files only, skip anything under a `tests/` directory unless given
-`--include-tests`, print their file accounting on stderr, and exit 2 on a root that
+Both commands list tracked files only and skip test code unless given `--include-tests`:
+anything under a `tests/` directory, plus Rust `#[cfg(test)]` items, and TypeScript or
+JavaScript under `test/` or `__tests__/` or named `*.test.*`, `*.spec.*`, `test-*` or
+`test_*`. They print their file accounting on stderr, and exit 2 on a root that
 leaves nothing to scan. Read the `unreadable` lines: a file that does not parse is
 missing from the result, not clean.
 
@@ -43,6 +49,7 @@ missing from the result, not clean.
 
 ```sh
 uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 <repo> [<repo> ...]
+uv run --script <skill-dir>/scripts/dry.py dupes --language rust --min-behavioural 3 <repo> [<repo> ...]
 uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 --cross-repo-only <repo> <repo> ...
 ```
 
@@ -56,6 +63,13 @@ uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 --cross-rep
   turned at 3, then held at 8% false positives on a library repo it was not tuned on.
   On a new corpus, hand-score the first twenty groups before trusting the output, and
   move it if template-shaped matches dominate.
+- **Read the false-positive rates here as a floor.** They were measured with an
+  earlier `ast` tokeniser. The tree-sitter one keeps about nine in ten of its Python
+  pairs at the defaults, and the pairs it adds run 42% false positives against 8% in
+  those it drops — mostly tests and CLI commands sharing a few setup lines.
+- **The `--min-tokens` default of 80 holds on Rust too.** On one single-crate CLI repo
+  it gave 14 removable groups out of 17, where 60 added four short `Option` and
+  iterator chains and 100 lost real groups. Unchecked on a second Rust repo.
 - **Expect cross-repo false positives at roughly double the within-repo rate**, from
   template-shaped matches multiplying across repos while genuine cross-repo clones stay
   rare. Measured at 31% against 12%.
@@ -75,7 +89,8 @@ uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 --cross-rep
   block**: two constant mapping tables over different enums, two models with disjoint
   fields, two router aggregators. Structure identical, nothing extractable.
 - **A container and its contents come back as separate groups** when the members sit in
-  different files. Act on the smaller one.
+  different files. Act on the smaller one. A Rust `impl` holding one method lists both
+  as locations of one site; count them once.
 - **A group is transitively linked, not a clique.** `min_similarity` covers the pairs
   that were scored, so two members can be less alike than it suggests. The same property
   is what merges one rule spelled under two names, which a grep never finds.
@@ -84,9 +99,10 @@ uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 --cross-rep
 
 ## Delete or promote a cross-repo group
 
-Each cross-repo group is classified from the roots' `pyproject.toml` dependency edges,
+Python cross-repo groups are classified from the roots' `pyproject.toml` dependency edges,
 and a library counts only when its own repo is one of the roots — **pass the shared
-library alongside the services**, or every group reads `unrelated`:
+library alongside the services**, or every group reads `unrelated`. Under any other
+`--language`, `shared` stays empty.
 
 | label | meaning |
 | --- | --- |
