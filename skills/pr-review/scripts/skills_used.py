@@ -25,19 +25,26 @@ from recollection:
   command that only names the path, or reads a part of the file below its frontmatter,
   is not a load.
 
-A row is kept only for a skill whose source is `owenlamont/skills`: the stamp's
-repo, or, for an unstamped Claude load, the `github-repo` in the loaded copy's
-frontmatter. Every other load is reported on stderr, with where it came from, and left
-out.
+Every load is a row. Its source is the stamp's repo, or, for an unstamped Claude load,
+the `github-repo` in the loaded copy's frontmatter; a load from anywhere but
+`owenlamont/skills` names that source beside its version rather than being dropped.
+When the repo under review is public, a load whose source is not public goes to stderr
+instead, so the table never names a private repo on a public page.
+
+A Claude Code subagent shares its parent's session id but writes its own transcript, so
+the transcript chosen is the one whose unanswered Bash call is running this script.
 """
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cache
 import io
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
 from typing import Annotated, Any, Final
 from urllib.parse import urlsplit
@@ -49,6 +56,13 @@ import yaml12
 
 CATALOGUE: Final = "owenlamont/skills"
 UNVERSIONED: Final = "unversioned"
+UNKNOWN_SOURCE: Final = "unknown source"
+# Enough of a transcript's end to hold the call running this script and the rows
+# a hook appends after it.
+_TAIL_BYTES: Final = 1 << 20
+_SCRIPT_NAME: Final = Path(__file__).name
+# A target whose visibility `gh` cannot read is treated as public, a source as private.
+_NOT_PUBLIC: Final = frozenset({"PRIVATE", "INTERNAL"})
 
 _BASE_PREFIX: Final = "Base directory for this skill: "
 _FRONTMATTER_DELIMITER: Final = "---"
@@ -293,13 +307,71 @@ def _harness_from_environment() -> Harness:
     )
 
 
+def _content_blocks(lines: Iterable[bytes]) -> Iterator[Mapping[str, Any]]:
+    for line in lines:
+        try:
+            row = orjson.loads(line)
+        except orjson.JSONDecodeError:
+            continue
+        message = row.get("message") if isinstance(row, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list):
+            yield from (block for block in content if isinstance(block, dict))
+
+
+def _names_this_script(block: Mapping[str, Any]) -> bool:
+    arguments = block.get("input")
+    command = arguments.get("command") if isinstance(arguments, dict) else None
+    return (
+        block.get("type") == "tool_use"
+        and block.get("name") == "Bash"
+        and isinstance(command, str)
+        and _SCRIPT_NAME in command
+    )
+
+
+def _running_this_script(path: Path) -> bool:
+    """Whether `path` holds a Bash call naming this script that has no result yet."""
+    with path.open("rb") as transcript:
+        transcript.seek(max(0, path.stat().st_size - _TAIL_BYTES))
+        tail = transcript.read().splitlines()
+    running: set[str] = set()
+    for block in _content_blocks(tail):
+        if block.get("type") == "tool_result":
+            running.discard(str(block.get("tool_use_id")))
+        elif _names_this_script(block):
+            running.add(str(block.get("id")))
+    return bool(running)
+
+
+def _claude_transcript(projects: Path, session: str) -> Path | None:
+    """The session's transcript, or its subagent's, that is running this script.
+
+    Raises
+    ------
+    SkillsUsedError
+        When more than one of them is.
+    """
+    main = sorted(projects.glob(f"*/{session}.jsonl"))
+    candidates = main + sorted(projects.glob(f"*/{session}/subagents/*.jsonl"))
+    running = [path for path in candidates if _running_this_script(path)]
+    if len(running) > 1:
+        listed = "\n  ".join(str(path) for path in running)
+        raise SkillsUsedError(
+            f"several transcripts of session {session} are running this script; "
+            f"pass --transcript with this agent's own:\n  {listed}"
+        )
+    return running[0] if running else next(iter(main), None)
+
+
 def find_transcript(harness: Harness) -> Path:
     """The current session's transcript for `harness`, located by its session id.
 
     Raises
     ------
     SkillsUsedError
-        When the harness's session id is unset or names no transcript.
+        When the harness's session id is unset, names no transcript, or names several
+        Claude Code transcripts running this script at once.
     """
     variable = (
         "CLAUDE_CODE_SESSION_ID"
@@ -311,13 +383,16 @@ def find_transcript(harness: Harness) -> Path:
         raise SkillsUsedError(f"{variable} is not set; pass --transcript")
     home = Path.home()
     found = (
-        sorted((home / ".claude" / "projects").glob(f"*/{session}.jsonl"))
+        _claude_transcript(home / ".claude" / "projects", session)
         if harness is Harness.CLAUDE_CODE
-        else sorted((home / ".codex" / "sessions").rglob(f"rollout-*-{session}.jsonl"))
+        else min(
+            (home / ".codex" / "sessions").rglob(f"rollout-*-{session}.jsonl"),
+            default=None,
+        )
     )
-    if not found:
+    if found is None:
         raise SkillsUsedError(f"no transcript for {variable}={session} under {home}")
-    return found[0]
+    return found
 
 
 def _rows(path: Path) -> Iterator[dict[str, Any]]:
@@ -351,10 +426,21 @@ def read_loads(path: Path, harness: Harness) -> tuple[SkillLoad, ...]:
     return tuple(folder.loads())
 
 
+def _label(load: SkillLoad) -> str:
+    version = load.version or UNVERSIONED
+    return (
+        version
+        if load.repo == CATALOGUE
+        else f"{version} from {load.repo or UNKNOWN_SOURCE}"
+    )
+
+
 def version_cell(loads: Iterable[SkillLoad]) -> str:
-    """The load's version, and any it changed to mid-session, in first-seen order."""
-    versions = list(dict.fromkeys(load.version or UNVERSIONED for load in loads))
-    first, *later = versions
+    """The load's version, and any it changed to mid-session, in first-seen order.
+
+    A load from outside `CATALOGUE` names its source.
+    """
+    first, *later = dict.fromkeys(_label(load) for load in loads)
     return f"{first} ({', '.join(later)} mid-session)" if later else first
 
 
@@ -369,6 +455,53 @@ def render_table(loads: Iterable[SkillLoad]) -> str:
         for name, group in sorted(by_name.items())
     ]
     return "\n".join(lines)
+
+
+@cache
+def visibility(repo: str | None) -> str | None:
+    """GitHub's `PUBLIC`, `PRIVATE` or `INTERNAL` for `repo`, or the cwd's for `None`.
+
+    `None` when `gh` cannot answer.
+    """
+    gh = shutil.which("gh")
+    if gh is None:
+        return None
+    target = [repo] if repo else []
+    query = ["--json", "visibility", "-q", ".visibility"]
+    done = subprocess.run(  # noqa: S603 - fixed argv, absolute binary, no shell
+        [gh, "repo", "view", *target, *query],
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+    )
+    return (done.stdout.strip() or None) if done.returncode == 0 else None
+
+
+@dataclass(frozen=True, slots=True)
+class Publishable:
+    shown: tuple[SkillLoad, ...]
+    withheld: tuple[SkillLoad, ...]
+
+
+def publishable(
+    loads: Iterable[SkillLoad],
+    *,
+    target_is_public: bool,
+    source_is_public: Callable[[str], bool],
+) -> Publishable:
+    """Split `loads` into those a table on the target repo may show and the rest."""
+    loads = tuple(loads)
+    if not target_is_public:
+        return Publishable(shown=loads, withheld=())
+    public = {
+        repo
+        for repo in {load.repo for load in loads}
+        if repo and source_is_public(repo)
+    }
+    return Publishable(
+        shown=tuple(load for load in loads if load.repo in public),
+        withheld=tuple(load for load in loads if load.repo not in public),
+    )
 
 
 app = typer.Typer(
@@ -386,12 +519,17 @@ def main(
         Path | None,
         typer.Option(help="Read this transcript instead of the current session's."),
     ] = None,
+    repo: Annotated[
+        str | None,
+        typer.Option(help="The owner/name the table is posted to; else the cwd's."),
+    ] = None,
 ) -> None:
     """Print the Skills used table for the skills this session's transcript loaded.
 
-    Each row's loaded-from path prints under the table, and every load from
-    outside owenlamont/skills goes to stderr. Exits 2 when no transcript can be
-    chosen.
+    Each row's loaded-from path prints under the table, and a load from outside
+    owenlamont/skills names its source in the version cell. On a public target
+    repo, a load whose source is not public goes to stderr instead of the table.
+    Exits 2 when no transcript can be chosen.
 
     Examples
     --------
@@ -407,19 +545,23 @@ def main(
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(2) from error
 
-    kept = [load for load in loads if load.repo == CATALOGUE]
-    typer.echo(render_table(kept))
-    if kept:
+    split = publishable(
+        loads,
+        target_is_public=visibility(repo) not in _NOT_PUBLIC,
+        source_is_public=lambda source: visibility(source) == "PUBLIC",
+    )
+    typer.echo(render_table(split.shown))
+    if split.shown:
         typer.echo("")
     for name, source in sorted(
-        dict.fromkeys((load.name, load.source) for load in kept)
+        dict.fromkeys((load.name, load.source) for load in split.shown)
     ):
         typer.echo(f"{name}\t{source}")
-    for name, source, repo in dict.fromkeys(
-        (load.name, load.source, load.repo) for load in loads if load.repo != CATALOGUE
+    for name, source in dict.fromkeys(
+        (load.name, load.source) for load in split.withheld
     ):
         typer.echo(
-            f"not a row: {name} from {source} (source {repo or 'unknown'})", err=True
+            f"not a row: {name} from {source} (source not public, target is)", err=True
         )
 
 
