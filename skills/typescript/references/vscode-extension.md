@@ -54,9 +54,10 @@ apply; this covers the extension host, the manifest and the release.
 
 ## Promise safety
 
-- **Set `checkThenables: true` on `no-floating-promises`** (oxlint and typescript-eslint
-  both take it). The `vscode` API returns `Thenable`, not `Promise`, and the rule skips
-  non-`Promise` thenables by default. A floating `window.showInformationMessage(...)`
+- **Keep `checkThenables: true` on `no-floating-promises`** (oxlint and
+  typescript-eslint both take it; the skill's oxlint config sets it). The `vscode`
+  API returns `Thenable`, not `Promise`, and the rule skips non-`Promise` thenables
+  by default. A floating `window.showInformationMessage(...)`
   or `commands.executeCommand(...)` goes unreported without it.
 
 ## Manifest

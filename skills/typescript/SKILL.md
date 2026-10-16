@@ -23,18 +23,20 @@ what those leave to TypeScript. For a VS Code extension, also read
   that needs it either refuses to install against it (a `typescript` peer range below
   the native major) or throws at startup. Check the tool's peer range and release notes
   rather than assuming either way.
-- **Where such a tool must run beside the native compiler, alias the last
-  JavaScript-API major under the `typescript` name** and install the native compiler
-  under another:
+- **Where such a tool must run beside the native compiler, alias the compatibility
+  package TypeScript publishes for the last JavaScript-API major under the
+  `typescript` name**, and install the native compiler under another. Check the
+  TypeScript release notes for the package's current name; for the 6-to-7 transition
+  it was:
 
   ```json
   "typescript": "npm:@typescript/typescript6@^6",
   "@typescript/native": "npm:typescript@^7"
   ```
 
-  `node_modules/.bin/tsc` is then the native compiler and `tsc6` the API one; API
-  consumers resolve `typescript` and get the one they support. Run the type-check gate
-  with `tsc`. Drop the alias once every consumer supports the native API.
+  `node_modules/.bin/tsc` is then the native compiler and the alias carries its own
+  `tsc6`; API consumers resolve `typescript` and get the one they support. Run the
+  type-check gate with `tsc`. Drop the alias once every consumer supports the native API.
 
 ## Compiler configuration
 
@@ -139,7 +141,8 @@ TypeScript only checks what its `module` setting describes.
 - **No barrel files inside an application.** Import from the defining module. A
   published package has one entry module per public entry point, and nothing else
   re-exports.
-- **A new package is ESM only** (`"type": "module"`). Add a CommonJS build for a named
+- **A new published library is ESM only** (`"type": "module"`); a bundled application
+  or extension emits whatever its host loads. Add a CommonJS build for a named
   consumer that cannot load ESM, never "just in case": dual packages carry two copies
   of every module and the hazards that brings.
 - **A published package declares `exports`, with the `types` condition first and
@@ -164,7 +167,8 @@ TypeScript only checks what its `module` setting describes.
 - **Promise rules need a type-aware linter that reads declaration files, and Biome's
   own type rules don't.** Biome's nursery promise rules infer types from project source.
   On a canary of floating calls into `@types/node` and `@types/vscode` they reported
-  none of four, where oxlint and typescript-eslint caught all four. Re-run the canary
+  none of four, where oxlint and typescript-eslint caught all four once
+  `checkThenables` was on. Re-run the canary
   before relying on a newer Biome for this. No domain or group switch enables these
   nursery rules: each must be named.
 - **Beside Biome, add oxlint in type-aware mode, narrowed to the type-aware rules** so
@@ -175,7 +179,10 @@ TypeScript only checks what its `module` setting describes.
   {
     "categories": { "correctness": "off" },
     "rules": {
-      "typescript/no-floating-promises": ["error", { "ignoreVoid": false }],
+      "typescript/no-floating-promises": [
+        "error",
+        { "ignoreVoid": false, "checkThenables": true }
+      ],
       "typescript/no-misused-promises": "error",
       "typescript/await-thenable": "error"
     }
@@ -183,8 +190,9 @@ TypeScript only checks what its `module` setting describes.
   ```
 
   Install `oxlint` and `oxlint-tsgolint`, and run `oxlint --type-aware`.
-  `ignoreVoid: false` is what enforces the
-  `void`-needs-a-handler rule above; the default accepts a bare `void p`.
+  `ignoreVoid: false` is what enforces the `void`-needs-a-handler rule above; the
+  default accepts a bare `void p`. `checkThenables` extends the rule to non-`Promise`
+  thenables, which some APIs return.
 - **A project on ESLint uses typescript-eslint's type-checked config with
   `projectService`.** Where its `typescript` peer range excludes the installed
   compiler, use the alias recipe under *Read the toolchain*. Don't downgrade the
