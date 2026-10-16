@@ -63,6 +63,10 @@ uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 --cross-rep
   turned at 3, then held at 8% false positives on a library repo it was not tuned on.
   On a new corpus, hand-score the first twenty groups before trusting the output, and
   move it if template-shaped matches dominate. The value was tuned on Python only.
+- **On Rust, try `--min-tokens 80`.** On one single-crate CLI repo the defaults gave 14
+  removable groups out of 21, and 80 dropped only false positives — short `Option` and
+  iterator chains — leaving 14 of 17. Unchecked on a second Rust repo; 100 lost real
+  groups.
 - **Expect cross-repo false positives at roughly double the within-repo rate**, from
   template-shaped matches multiplying across repos while genuine cross-repo clones stay
   rare. Measured at 31% against 12%.
@@ -82,7 +86,8 @@ uv run --script <skill-dir>/scripts/dry.py dupes --min-behavioural 3 --cross-rep
   block**: two constant mapping tables over different enums, two models with disjoint
   fields, two router aggregators. Structure identical, nothing extractable.
 - **A container and its contents come back as separate groups** when the members sit in
-  different files. Act on the smaller one.
+  different files. Act on the smaller one. A Rust `impl` holding one method lists both
+  as locations of one site; count them once.
 - **A group is transitively linked, not a clique.** `min_similarity` covers the pairs
   that were scored, so two members can be less alike than it suggests. The same property
   is what merges one rule spelled under two names, which a grep never finds.

@@ -570,7 +570,9 @@ def _under_test_cfg(node: Node, source: bytes) -> bool:
     current: Node | None = node
     while current is not None:
         sibling = current.prev_named_sibling
-        while sibling is not None and sibling.type == "attribute_item":
+        while sibling is not None and (
+            sibling.type == "attribute_item" or sibling.type in _COMMENTS
+        ):
             if "cfg(test)" in _node_text(sibling, source).replace(" ", ""):
                 return True
             sibling = sibling.prev_named_sibling

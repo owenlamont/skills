@@ -190,7 +190,7 @@ def test_rust_cfg_test_items(
     make_repo: MakeRepo, run_detect: Detect, *, include_tests: bool, expected: set[str]
 ) -> None:
     source = (
-        "#[cfg(test)] fn a() { f(); } "
+        "#[cfg(test)]\n/// Doc.\nfn a() { f(); } "
         "#[cfg(test)] mod tests { fn b() { g(); } } "
         "fn c() { h(); }"
     )
