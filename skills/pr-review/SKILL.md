@@ -676,10 +676,12 @@ It finds the current session's transcript from the harness's session id, and tak
 ids are set. A Claude Code subagent shares its parent's session id, so the script reads
 whichever of the session's transcripts is running it, and asks for `--transcript` when
 two are. Each row's loaded-from path prints under the table, and a load whose source is
-not `owenlamont/skills` names that source in its version cell. A row is a load the
-transcript shows — a `Skill` call for Claude Code, and for Codex a read of the installed
-`SKILL.md` whose output shows its frontmatter — so a skill
-missing from it did not load, and a Codex read of a checkout copy or of a section below
+not `owenlamont/skills` names that source in its version cell. When the repo the table
+goes to is public — the cwd's, or `--repo <owner/name>` — a load whose source `gh` does
+not report as public goes to stderr instead, so the table names no private repo. A row is
+a load the transcript shows — a `Skill` call for Claude Code, and for Codex a read of
+the installed `SKILL.md` whose output shows its frontmatter — so a skill missing from it
+did not load, and a Codex read of a checkout copy or of a section below
 the frontmatter is not a load either.
 
 The version is the install stamp as it stood **when the skill loaded**, not what is on

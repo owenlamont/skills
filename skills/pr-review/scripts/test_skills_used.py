@@ -17,6 +17,7 @@ import pytest
 from skills_used import (
     find_transcript,
     Harness,
+    publishable,
     render_table,
     SkillLoad,
     SkillsUsedError,
@@ -126,3 +127,29 @@ def test_a_load_from_another_repo_is_a_row_naming_its_source() -> None:
         "| `pr-review` | v0.1.0 |",
         "| `vendored` | unversioned from unknown source |",
     ]
+
+
+@pytest.mark.parametrize(
+    ("target_is_public", "expected_shown"),
+    [
+        pytest.param(True, ("pr-review",), id="public target withholds private source"),
+        pytest.param(False, ("docs", "pr-review"), id="private target shows every row"),
+    ],
+)
+def test_a_table_on_a_public_repo_names_no_private_source(
+    target_is_public: bool, expected_shown: tuple[str, ...]
+) -> None:
+    loads = (
+        SkillLoad(name="docs", version="v0.21.3", repo="example/private", source="/a"),
+        SkillLoad(
+            name="pr-review", version="v0.1.0", repo="example/public", source="/b"
+        ),
+    )
+
+    split = publishable(
+        loads,
+        target_is_public=target_is_public,
+        source_is_public=lambda repo: repo == "example/public",
+    )
+
+    assert tuple(load.name for load in split.shown) == expected_shown

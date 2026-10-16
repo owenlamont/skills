@@ -28,18 +28,23 @@ from recollection:
 Every load is a row. Its source is the stamp's repo, or, for an unstamped Claude load,
 the `github-repo` in the loaded copy's frontmatter; a load from anywhere but
 `owenlamont/skills` names that source beside its version rather than being dropped.
+When the repo under review is public, a load whose source is not public goes to stderr
+instead, so the table never names a private repo on a public page.
 
 A Claude Code subagent shares its parent's session id but writes its own transcript, so
 the transcript chosen is the one whose unanswered Bash call is running this script.
 """
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cache
 import io
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
 from typing import Annotated, Any, Final
 from urllib.parse import urlsplit
@@ -450,6 +455,53 @@ def render_table(loads: Iterable[SkillLoad]) -> str:
     return "\n".join(lines)
 
 
+@cache
+def is_public(repo: str | None) -> bool:
+    """Whether GitHub reports `repo` as public; `None` is the repo in the cwd.
+
+    Anything `gh` cannot answer reads as not public.
+    """
+    gh = shutil.which("gh")
+    if gh is None:
+        return False
+    target = [repo] if repo else []
+    query = ["--json", "visibility", "-q", ".visibility"]
+    done = subprocess.run(  # noqa: S603 - fixed argv, absolute binary, no shell
+        [gh, "repo", "view", *target, *query],
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+    )
+    return done.returncode == 0 and done.stdout.strip() == "PUBLIC"
+
+
+@dataclass(frozen=True, slots=True)
+class Publishable:
+    shown: tuple[SkillLoad, ...]
+    withheld: tuple[SkillLoad, ...]
+
+
+def publishable(
+    loads: Iterable[SkillLoad],
+    *,
+    target_is_public: bool,
+    source_is_public: Callable[[str], bool],
+) -> Publishable:
+    """Split `loads` into those a table on the target repo may show and the rest."""
+    loads = tuple(loads)
+    if not target_is_public:
+        return Publishable(shown=loads, withheld=())
+    public = {
+        repo
+        for repo in {load.repo for load in loads}
+        if repo and source_is_public(repo)
+    }
+    return Publishable(
+        shown=tuple(load for load in loads if load.repo in public),
+        withheld=tuple(load for load in loads if load.repo not in public),
+    )
+
+
 app = typer.Typer(
     add_completion=False, context_settings={"help_option_names": ["-h", "--help"]}
 )
@@ -465,12 +517,17 @@ def main(
         Path | None,
         typer.Option(help="Read this transcript instead of the current session's."),
     ] = None,
+    repo: Annotated[
+        str | None,
+        typer.Option(help="The owner/name the table is posted to; else the cwd's."),
+    ] = None,
 ) -> None:
     """Print the Skills used table for the skills this session's transcript loaded.
 
     Each row's loaded-from path prints under the table, and a load from outside
-    owenlamont/skills names its source in the version cell. Exits 2 when no
-    transcript can be chosen.
+    owenlamont/skills names its source in the version cell. On a public target
+    repo, a load whose source is not public goes to stderr instead of the table.
+    Exits 2 when no transcript can be chosen.
 
     Examples
     --------
@@ -486,13 +543,22 @@ def main(
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(2) from error
 
-    typer.echo(render_table(loads))
-    if loads:
+    split = publishable(
+        loads, target_is_public=is_public(repo), source_is_public=is_public
+    )
+    typer.echo(render_table(split.shown))
+    if split.shown:
         typer.echo("")
     for name, source in sorted(
-        dict.fromkeys((load.name, load.source) for load in loads)
+        dict.fromkeys((load.name, load.source) for load in split.shown)
     ):
         typer.echo(f"{name}\t{source}")
+    for name, source in dict.fromkeys(
+        (load.name, load.source) for load in split.withheld
+    ):
+        typer.echo(
+            f"not a row: {name} from {source} (source not public, target is)", err=True
+        )
 
 
 if __name__ == "__main__":
