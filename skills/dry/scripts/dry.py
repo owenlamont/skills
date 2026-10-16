@@ -66,6 +66,21 @@ class CorpusError(Exception):
     """The corpus cannot be listed, or a root holds nothing to scan."""
 
 
+class LanguageName(StrEnum):
+    PYTHON = "python"
+    RUST = "rust"
+    TYPESCRIPT = "typescript"
+    JAVASCRIPT = "javascript"
+
+
+_SUFFIXES: Final = {
+    LanguageName.PYTHON: (".py",),
+    LanguageName.RUST: (".rs",),
+    LanguageName.TYPESCRIPT: (".ts", ".mts", ".cts", ".tsx"),
+    LanguageName.JAVASCRIPT: (".js", ".mjs", ".cjs", ".jsx"),
+}
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SourceFile:
     path: Path
@@ -101,14 +116,15 @@ def require_distinct_names(roots: Sequence[Path]) -> None:
         raise CorpusError(message)
 
 
-def tracked_python_files(root: Path) -> list[Path]:
-    """List the repo's tracked .py files, so a stray venv cannot enter the corpus."""
+def tracked_files(root: Path, language: LanguageName) -> list[Path]:
+    """List the repo's tracked source files, so a stray venv cannot enter the corpus."""
     git = shutil.which("git")
     if git is None:
         message = "git is not on PATH, so the tracked-file list cannot be read"
         raise CorpusError(message)
     listing = subprocess.run(  # noqa: S603 - fixed argv, absolute binary, no shell
-        [git, "-C", str(root), "ls-files", "-z", "*.py"],
+        [git, "-C", str(root), "ls-files", "-z", "--"]
+        + [f"*{suffix}" for suffix in _SUFFIXES[language]],
         capture_output=True,
         encoding="utf-8",
         check=False,
@@ -119,31 +135,59 @@ def tracked_python_files(root: Path) -> list[Path]:
     return [root / name for name in listing.stdout.split("\0") if name]
 
 
-def _is_test_path(relative: Path) -> bool:
-    return "tests" in relative.parts[:-1]
+def _is_test_path(relative: Path, language: LanguageName) -> bool:
+    directories = set(relative.parts[:-1])
+    if language in {LanguageName.PYTHON, LanguageName.RUST}:
+        return "tests" in directories
+    name = relative.name.lower()
+    return (
+        bool({"test", "tests", "__tests__"} & directories)
+        or name.startswith(("test-", "test_"))
+        or ".test." in name
+        or ".spec." in name
+    )
+
+
+def eligible_files(
+    *, root: Path, language: LanguageName, include_tests: bool, accounting: Accounting
+) -> list[Path]:
+    """Return the tracked files to scan under one root, counting what was excluded.
+
+    Raises ``CorpusError`` when the root has no tracked source left to scan once tests
+    are excluded — a wrong path or a tests-only root would otherwise report zero
+    findings, which reads exactly like a clean repository.
+    """
+    paths = tracked_files(root, language)
+    eligible = [
+        path
+        for path in paths
+        if include_tests or not _is_test_path(path.relative_to(root), language)
+    ]
+    accounting.tracked += len(paths)
+    accounting.excluded_tests += len(paths) - len(eligible)
+    if not eligible:
+        suffixes = "/".join(_SUFFIXES[language])
+        detail = (
+            f"tracks no {suffixes} files" if not paths else "tracks only test files"
+        )
+        message = f"{root} {detail}, so there is nothing to scan"
+        raise CorpusError(message)
+    return eligible
 
 
 def parse_corpus(
     *, root: Path, prefix: str, include_tests: bool, accounting: Accounting
 ) -> Iterator[SourceFile]:
-    """Yield every parseable tracked file under one root, recording the rest.
+    """Yield every parseable tracked Python file under one root, recording the rest.
 
-    Raises ``CorpusError`` when the root has no tracked Python left to scan once tests
-    are excluded — a wrong path or a tests-only root would otherwise report zero
-    findings, which reads exactly like a clean repository.
+    Raises ``CorpusError`` when the root leaves nothing to scan.
     """
-    paths = tracked_python_files(root)
-    eligible = [
-        path
-        for path in paths
-        if include_tests or not _is_test_path(path.relative_to(root))
-    ]
-    accounting.tracked += len(paths)
-    accounting.excluded_tests += len(paths) - len(eligible)
-    if not eligible:
-        detail = "tracks no .py files" if not paths else "tracks only test files"
-        message = f"{root} {detail}, so there is nothing to scan"
-        raise CorpusError(message)
+    eligible = eligible_files(
+        root=root,
+        language=LanguageName.PYTHON,
+        include_tests=include_tests,
+        accounting=accounting,
+    )
     for path in eligible:
         label = prefix + str(path.relative_to(root))
         try:
@@ -228,13 +272,6 @@ class Report(TypedDict):
     groups: list[Group]
     unreadable: list[str]
     timings_seconds: dict[str, float]
-
-
-class LanguageName(StrEnum):
-    PYTHON = "python"
-    RUST = "rust"
-    TYPESCRIPT = "typescript"
-    JAVASCRIPT = "javascript"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -383,12 +420,7 @@ def _fragments(
         )
 
 
-_SUFFIXES: Final = {
-    LanguageName.RUST: (".rs",),
-    LanguageName.TYPESCRIPT: (".ts", ".mts", ".cts", ".tsx"),
-    LanguageName.JAVASCRIPT: (".js", ".mjs", ".cjs", ".jsx"),
-}
-_FRAGMENT_KINDS: Final = {
+FRAGMENT_KINDS: Final = {
     LanguageName.RUST: frozenset({"function_item", "impl_item", "trait_item"}),
     LanguageName.TYPESCRIPT: frozenset(
         {
@@ -427,7 +459,7 @@ _BODY_KINDS: Final = {
     "arrow_function": "body",
     "function_expression": "body",
 }
-_RUST_BEHAVIOURAL: Final = frozenset(
+RUST_BEHAVIOURAL: Final = frozenset(
     {
         "call_expression",
         "macro_invocation",
@@ -445,7 +477,7 @@ _RUST_BEHAVIOURAL: Final = frozenset(
         "closure_expression",
     }
 )
-_SCRIPT_BEHAVIOURAL: Final = frozenset(
+SCRIPT_BEHAVIOURAL: Final = frozenset(
     {
         "call_expression",
         "new_expression",
@@ -500,6 +532,17 @@ _LITERALS: Final = frozenset(
         "undefined",
     }
 )
+_GRAMMARS: Final = {
+    ".rs": Language(tree_sitter_rust.language()),
+    ".ts": Language(tree_sitter_typescript.language_typescript()),
+    ".mts": Language(tree_sitter_typescript.language_typescript()),
+    ".cts": Language(tree_sitter_typescript.language_typescript()),
+    ".tsx": Language(tree_sitter_typescript.language_tsx()),
+    ".js": Language(tree_sitter_javascript.language()),
+    ".mjs": Language(tree_sitter_javascript.language()),
+    ".cjs": Language(tree_sitter_javascript.language()),
+    ".jsx": Language(tree_sitter_javascript.language()),
+}
 _PUNCTUATION: Final = frozenset({"(", ")", "{", "}", "[", "]", ",", ";", ":", "."})
 _COMMENTS: Final = frozenset({"comment", "line_comment", "block_comment"})
 _TYPE_NODES: Final = frozenset(
@@ -515,54 +558,8 @@ _TYPE_NODES: Final = frozenset(
 )
 
 
-def _tracked_language_files(root: Path, language: LanguageName) -> list[Path]:
-    """List tracked files with the selected language's suffixes."""
-    git = shutil.which("git")
-    if git is None:
-        raise CorpusError("git is not on PATH, so the tracked-file list cannot be read")
-    listing = subprocess.run(  # noqa: S603 - fixed argv, absolute binary, no shell
-        [git, "-C", str(root), "ls-files", "-z"],
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if listing.returncode:
-        raise CorpusError(f"{root}: git ls-files failed: {listing.stderr.strip()}")
-    return [
-        root / name
-        for name in listing.stdout.split("\0")
-        if name.endswith(_SUFFIXES[language])
-    ]
-
-
-def _is_language_test_path(relative: Path, language: LanguageName) -> bool:
-    parts = relative.parts[:-1]
-    if language is LanguageName.RUST:
-        return "tests" in parts
-    stem = relative.name.lower()
-    return (
-        bool({"test", "tests", "__tests__"} & set(parts))
-        or stem.startswith(("test-", "test_"))
-        or ".test." in stem
-        or ".spec." in stem
-    )
-
-
-def _parser(language: LanguageName, path: Path) -> Parser:
-    match language:
-        case LanguageName.RUST:
-            grammar = tree_sitter_rust.language()
-        case LanguageName.TYPESCRIPT:
-            grammar = (
-                tree_sitter_typescript.language_tsx()
-                if path.suffix == ".tsx"
-                else tree_sitter_typescript.language_typescript()
-            )
-        case LanguageName.JAVASCRIPT:
-            grammar = tree_sitter_javascript.language()
-        case _:
-            raise ValueError(language)
-    return Parser(Language(grammar))
+def _parser(path: Path) -> Parser:
+    return Parser(_GRAMMARS[path.suffix])
 
 
 def _node_text(node: Node, source: bytes) -> str:
@@ -613,7 +610,7 @@ def _normalise_tree(
 ) -> tuple[tuple[str, ...], int]:
     tokens: list[str] = []
     behavioural = 0
-    active = _RUST_BEHAVIOURAL if language is LanguageName.RUST else _SCRIPT_BEHAVIOURAL
+    active = RUST_BEHAVIOURAL if language is LanguageName.RUST else SCRIPT_BEHAVIOURAL
 
     def visit(current: Node, in_type: bool = False) -> None:
         nonlocal behavioural
@@ -662,7 +659,7 @@ def _tree_fragment_name(node: Node, source: bytes) -> str | None:
 def _tree_fragment(
     *, node: Node, source: bytes, label: str, language: LanguageName, settings: Settings
 ) -> Fragment | None:
-    if node.type not in _FRAGMENT_KINDS[language]:
+    if node.type not in FRAGMENT_KINDS[language]:
         return None
     if (
         language is LanguageName.RUST
@@ -693,11 +690,8 @@ def _tree_fragments(
     *, tree: Node, source: bytes, label: str, language: LanguageName, settings: Settings
 ) -> Iterator[Fragment]:
     stack = [tree]
-    last_byte = len(source)
     while stack:
         node = stack.pop()
-        if node.start_byte > last_byte or node.end_byte > last_byte:
-            continue
         stack.extend(reversed(node.named_children))
         fragment = _tree_fragment(
             node=node, source=source, label=label, language=language, settings=settings
@@ -714,28 +708,18 @@ def _language_fragments(
     settings: Settings,
     accounting: Accounting,
 ) -> Iterator[Fragment]:
-    paths = _tracked_language_files(root, language)
-    eligible = [
-        path
-        for path in paths
-        if settings.include_tests
-        or not _is_language_test_path(path.relative_to(root), language)
-    ]
-    accounting.tracked += len(paths)
-    accounting.excluded_tests += len(paths) - len(eligible)
-    if not eligible:
-        detail = (
-            f"tracks no {language.value} files"
-            if not paths
-            else "tracks only test files"
-        )
-        raise CorpusError(f"{root} {detail}, so there is nothing to scan")
+    eligible = eligible_files(
+        root=root,
+        language=language,
+        include_tests=settings.include_tests,
+        accounting=accounting,
+    )
     for path in eligible:
         label = prefix + str(path.relative_to(root))
         try:
             source = path.read_bytes()
             source.decode("utf-8")
-            tree = _parser(language, path).parse(source).root_node
+            tree = _parser(path).parse(source).root_node
             if tree.has_error:
                 accounting.unreadable.append(label)
                 continue
@@ -892,6 +876,7 @@ def _group(
     members: set[int],
     fragments: Sequence[Fragment],
     pairs: Mapping[tuple[int, int], float],
+    multi: bool,
     dependencies: _Dependencies | None,
 ) -> Group:
     ordered = sorted(
@@ -901,9 +886,7 @@ def _group(
         s for (left, right), s in pairs.items() if left in members and right in members
     ]
     repos = (
-        sorted({fragments[i].path.split("/", 1)[0] for i in ordered})
-        if dependencies
-        else []
+        sorted({fragments[i].path.split("/", 1)[0] for i in ordered}) if multi else []
     )
     cross_repo = len(repos) > 1
     return Group(
@@ -986,17 +969,17 @@ def detect(
     scored_at = time.perf_counter()
 
     dependencies = (
-        (
-            _Dependencies.read(roots)
-            if settings.language is LanguageName.PYTHON
-            else _Dependencies(provides={}, depends={})
-        )
-        if multi
+        _Dependencies.read(roots)
+        if multi and settings.language is LanguageName.PYTHON
         else None
     )
     groups = [
         _group(
-            members=members, fragments=fragments, pairs=pairs, dependencies=dependencies
+            members=members,
+            fragments=fragments,
+            pairs=pairs,
+            multi=multi,
+            dependencies=dependencies,
         )
         for members in _clusters(pairs)
     ]
