@@ -3,8 +3,6 @@ yaml = [
     '**/*.yaml',
     '**/*.yml',
 ]
-# Classify markdown so a bare `ryl .` lints embedded YAML too, matching the
-# prek `ryl` + `ryl-markdown` hooks. Mirrors the `ryl-markdown` default globs.
 markdown = [
     '**/*.md',
     '**/*.markdown',
@@ -20,6 +18,22 @@ markdown = [
 [markdown]
 front-matter = true
 fenced-blocks = false
+
+[format]
+quote-style = 'single'
+line-ending = 'lf'
+document-start = 'preserve'
+document-end = 'preserve'
+fold-long-lines = false
+brace-spacing = false
+comment-spacing = 2
+comment-starting-space = 'add'
+max-blank-lines = 2
+preview = false
+sequence-style = 'preserve'
+mapping-style = 'preserve'
+indent-sequences = true
+dash-on-own-line = false
 
 [lint.rules]
 anchors = 'enable'
@@ -70,6 +84,7 @@ level = 'warning'
 quote-type = 'single'
 required = 'only-when-needed'
 allow-double-quotes-for-escaping = true
+allow-quoted-quotes = true
 
 [lint]
 fixable = ["ALL"]
