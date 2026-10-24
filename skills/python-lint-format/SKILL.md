@@ -51,7 +51,7 @@ Each hook is driven by a config file at the repo root:
 | `ty.toml`          | ty         | Static type checking    |
 | `.complexipy.toml` | complexipy | Code complexity limits  |
 | `.rumdl.toml`      | rumdl      | Markdown linting        |
-| `.ryl.toml`        | ryl        | YAML linting            |
+| `.ryl.toml`        | ryl        | YAML lint and format    |
 | `typos.toml`       | typos      | Spelling                |
 | `biome.json`       | Biome      | JS/TS/JSON linting      |
 
