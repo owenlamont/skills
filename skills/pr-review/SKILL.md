@@ -283,7 +283,8 @@ The three causes report differently, so say which:
 Run every pass, and keep iterating until nothing is left outstanding:
 
 1. **Self-review** — your own pass over the resolved revision, per *Review the code, not
-   the diff* below, reporting on the axes further down. It goes first because this is
+   the diff* and *Review the design, not just the code* below, reporting on the axes
+   further down. It goes first because this is
    where the domain skills identified in *Inventory, then load the specialists* above get
    applied to the code — there is no separate specialist pass — and because the
    adversarial round is worth more against a revision whose obvious problems are fixed.
@@ -587,6 +588,9 @@ either its word or your own. Its findings clear the same bar as your own, below.
   ```
 
   The command prints nothing when no PR sits above.
+- Check each new or changed Python signature against `python-code-style`'s signature
+  test: a reader must understand the parameters and return value without opening the
+  body. Report failures as standards findings.
 - Check the PR body's specific claims — "adds tests for X", coverage numbers — against
   what the diff actually contains.
 - Verify the author's claims yourself with the narrowest useful test, or by exercising
@@ -600,6 +604,26 @@ either its word or your own. Its findings clear the same bar as your own, below.
   ORM produce diffs that look like correctness bugs and aren't, so confirm a suspected
   difference changes an observable result before reporting it. A fabricated bug against
   a correct PR costs more than the review returns.
+- **Check precedent before calling a new pattern novel or recommending an alternative.**
+  Search the repo and comparable deployed projects for the inheritance shape, library,
+  test infrastructure or module layout; name what you checked. A sandbox does not set a
+  convention. Trace deployment configuration to an actual deployment, and a library to
+  a deployed consumer's dependency manifest. A departure needs a concrete benefit that
+  outweighs the inconsistency and upkeep. Novelty alone is no defect, and an explicit
+  specialist rule outranks precedent.
+
+## Review the design, not just the code
+
+- Establish what the PR is for and whether the change belongs in the repo or service,
+  using comparable deployed code as evidence. Read an applicable architecture or design
+  document, the closing issue and comments, any parent epic, the PR's alternatives
+  considered, and any design reference linked by the domain skill.
+- Trace producers as well as consumers: upstream jobs, services or feeds may need to
+  change alongside the interface. Check operational effects too: shared-channel alert
+  noise, partner API load and rollout ordering that a single deploy cannot honour.
+- Where an issue's design is already agreed, review the implementation against the
+  agreed requirements. Put disagreement with the agreed design to the person who asked
+  for the review; keep implementation divergence as a finding on the PR.
 
 ## Report on separate axes
 
