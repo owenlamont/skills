@@ -165,6 +165,9 @@ its bar.
 - Suffix variables and function arguments with their unit of measure where one applies
   (e.g. `timeout_ms`, `payload_size_bytes`, `duration_seconds`), so the name carries the
   unit. A unit is meaning, not type, so it belongs in the name even though a type doesn't.
+- Where a domain has several conventions for the same idea, name which convention a
+  value follows: `calendar_date`, `interval_start` or `interval_end`, rather than a bare
+  `day` or `interval_date`. Settle the name before publishing a field or database key.
 - Name for meaning rather than implementation: don't encode a variable's type in its name
   (`id_to_name_dict`, `prices_df`) — the annotation already carries it, and the Google
   style guide lists type-in-name under *Names to Avoid*. Write boolean predicates
@@ -183,8 +186,10 @@ its bar.
   whether numeric range bounds are inclusive or exclusive, even when the parameters
   themselves are self-evident.
 - Private functions (single-underscore prefix, per PEP 8) used within a module don't need
-  docstrings, unless their names and type hints aren't sufficient to convey their
-  semantics.
+  docstrings unless the signature fails this test: a reader must not need the body to
+  know what a parameter holds or what the return value means. Fix unclear names or types
+  first; where names and types cannot carry the semantics, document only the unclear
+  parameters or return value using the Google-style conventions above.
 - A suppression is a last resort, not the first response to a warning: fix the root cause
   so the rule genuinely stops firing, and reach for `noqa`, `type: ignore`, or a coverage
   `pragma` only for a demonstrable false positive or a warning that isn't reasonably
@@ -226,7 +231,20 @@ its bar.
   (use `math.isclose` or an explicit tolerance).
 - Use a plain string literal, not an f-string, when there's nothing to interpolate.
 - `sql-data-modelling` owns where a SQL statement belongs — a `.sql` file loaded at
-  runtime versus a Python string literal — along with the SQL itself.
+  runtime versus a Python string literal — and SQL correctness. Python value binding
+  follows the rule below.
+- Where `sql-data-modelling` allows inline SQL and the library supports template
+  strings, use a t-string to bind runtime values rather than an f-string or a separate
+  parameter dictionary. Python 3.14+ is required: SQLAlchemy 2.1+ accepts templates via
+  [`sqlalchemy.tstring()`](https://docs.sqlalchemy.org/en/21/core/sqlelement.html#sqlalchemy.sql.expression.tstring),
+  and [psycopg 3.3+](https://www.psycopg.org/psycopg3/docs/basic/tstrings.html)
+  accepts them in `execute()`. Check the project's minimum versions first.
+  - A plain string in an identifier position binds as a value. Use `sa.column()` or
+    `sa.table()`, or psycopg's `{name:i}`; check the rendered quoting for reserved names.
+  - For SQLAlchemy `IN`, interpolate `sa.bindparam(..., expanding=True)` rather than a
+    list directly. With psycopg on PostgreSQL, use `= ANY({values})` for a list.
+  - PostgreSQL CHECK constraints cannot bind parameters. SQLAlchemy renders template
+    values inline inside `CheckConstraint`; psycopg needs `{value:l}` for a literal.
 - Compare versions with `packaging.version.Version`, not string or tuple comparison
   (which sorts e.g. `0.10` before `0.9`).
 

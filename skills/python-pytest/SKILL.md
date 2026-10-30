@@ -14,14 +14,16 @@ Standards for authoring tests and laying out the test suite, which uses
 - Do most test setup with fixtures and parameters so the code under test is at, or near,
   the beginning of the test function.
 - Prefer fixtures over module-level helper functions for test data and setup: a builder
-  that takes no arguments should be a fixture (injected, not called), and a *parameterized*
-  builder should be a **factory fixture** — a fixture that returns a callable the test
-  invokes with its per-case arguments. Keep a plain module-level function only when the
-  builder must be called inside a `@pytest.mark.parametrize(...)` decorator, whose
+  that takes no arguments should be a fixture (injected, not called). A *parameterized*
+  builder shared across test modules belongs in `conftest.py` as a **factory fixture** —
+  a fixture returning a callable the test invokes with per-case arguments. Consolidate
+  near-duplicate builders across modules into one factory fixture. A parameterized helper
+  used by one module can stay a plain function, as must a builder called inside a
+  `@pytest.mark.parametrize(...)` decorator, whose
   arguments are evaluated at collection time, where fixtures can't be requested/injected.
-  A suite that already standardises on module-level builders doesn't license another one:
-  write the fixture, and raise the existing builders as a cleanup of their own rather than
-  matching them or rewriting them mid-change (`software-engineering` covers that call).
+  Existing builders copied across modules don't license another copy: write the shared
+  fixture, and raise the copies as a separate cleanup (`software-engineering` covers
+  that call).
 - Compose fixtures from other fixtures rather than mutating fixture values, put shared
   fixtures in `conftest.py`, give each fixture a single purpose, and restore any global
   state you mutate after the `yield`.
