@@ -104,6 +104,10 @@ def action_facts() -> Any:
         ),
         pytest.param("MIT OR LicenseRef-", "REVIEW", id="malformed custom reference"),
         pytest.param("GPL 2.0+", "FAIL", id="legacy alias for a forbidden licence"),
+        pytest.param("MIT WITH GPL 2.0+", "REVIEW", id="licence used as an exception"),
+        pytest.param(
+            "MIT OR LLVM-exception", "REVIEW", id="exception used as a licence"
+        ),
     ],
 )
 def test_licence_expression(expression: str, expected: str) -> None:

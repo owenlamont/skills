@@ -226,7 +226,7 @@ def _parse_expression(expression: str) -> Any:
     with contextlib.suppress(InvalidLicenseExpression, ExpressionError):
         return licensing.parse(canonicalize_license_expression(expression))
     with contextlib.suppress(ExpressionError):
-        return licensing.parse(expression, validate=True)
+        return licensing.parse(expression, validate=True, strict=True)
     return None
 
 
