@@ -93,10 +93,16 @@ def action_facts() -> Any:
         pytest.param("BSD-4-Clause", "FAIL", id="bsd with the advertising clause"),
         pytest.param("LicenseRef-Proprietary", "REVIEW", id="custom licence reference"),
         pytest.param(
-            "GPL-3.0-only AND LicenseRef-Extra",
+            "GPL-3.0-only AND licenseref-Extra",
             "FAIL",
             id="custom licence does not soften a forbidden one",
         ),
+        pytest.param(
+            "LicenseRef-Extra WITH LLVM-exception",
+            "REVIEW",
+            id="exception on a custom licence",
+        ),
+        pytest.param("MIT OR LicenseRef-", "REVIEW", id="malformed custom reference"),
     ],
 )
 def test_licence_expression(expression: str, expected: str) -> None:

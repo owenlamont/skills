@@ -35,6 +35,7 @@ from license_expression import (
     OR,
 )
 import orjson
+from packaging.licenses import canonicalize_license_expression, InvalidLicenseExpression
 from packaging.version import InvalidVersion, Version
 import typer
 import yaml12
@@ -208,6 +209,10 @@ def _node_check(node: Any) -> Check:
         base = _symbol_check(node.license_symbol.key)
         if base.verdict is Verdict.PASS:
             return base
+        if node.license_symbol.key.startswith("LicenseRef-"):
+            return _licence(
+                Verdict.REVIEW, f"`{node}`: read the custom licence and its exception"
+            )
         return _licence(Verdict.FAIL, f"`{node}` needs an approved exception to adopt")
     if isinstance(node, LicenseSymbol):
         return _symbol_check(node.key)
@@ -218,10 +223,9 @@ def _expression_check(expression: str | None) -> Check | None:
     if not expression or len(expression) > MAX_EXPRESSION_LENGTH:
         return None
     try:
-        parsed = get_spdx_licensing().parse(
-            expression, validate="LicenseRef-" not in expression
-        )
-    except ExpressionError:
+        canonical = canonicalize_license_expression(expression)
+        parsed = get_spdx_licensing().parse(canonical)
+    except InvalidLicenseExpression, ExpressionError:
         return None
     if parsed is None:
         return None
