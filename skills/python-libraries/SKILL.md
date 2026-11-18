@@ -11,8 +11,9 @@ less to maintain and less to get wrong than reinventing a solved problem.
 
 ## Choosing and maintaining a dependency
 
-- Don't add a dependency for a task the standard library handles, or one with no
-  maintainer or recent release.
+- Don't add a dependency for a task the standard library handles. Whether a candidate
+  is fit to adopt — maintenance, licence, cooldown, install-time code — is
+  `dependency-adoption`'s call.
 - When a widely used library goes unmaintained, prefer a maintained drop-in successor over
   staying on the dormant one — but confirm on PyPI that the successor exists and is
   actively released before naming it in code or docs. Don't assume a `<pkg>2` exists

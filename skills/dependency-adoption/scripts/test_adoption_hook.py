@@ -1,0 +1,137 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#     "orjson>=3.12.0",
+#     "pytest>=9.0.0",
+#     "tree-sitter>=0.26.0",
+#     "tree-sitter-bash>=0.25.1",
+# ]
+# ///
+import adoption_hook
+import pytest
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        pytest.param("uv add httpx", [("uv", False)], id="uv add installs"),
+        pytest.param(
+            "uv add --no-sync --no-build httpx", [("uv", True)], id="uv lock only"
+        ),
+        pytest.param(
+            "uv add --no-sync httpx", [("uv", False)], id="uv no-sync alone can build"
+        ),
+        pytest.param(
+            "uv add --no-build --script tool.py httpx",
+            [("uv", True)],
+            id="pep 723 script",
+        ),
+        pytest.param("cd web && pnpm add -D vite", [("pnpm", False)], id="chained"),
+        pytest.param(
+            "pnpm add --lockfile-only vite", [("pnpm", True)], id="pnpm lock only"
+        ),
+        pytest.param("npm i lodash", [("npm", False)], id="npm short verb"),
+        pytest.param("pnpm install", [], id="install from the lockfile"),
+        pytest.param("uv sync --locked", [], id="sync"),
+        pytest.param("echo 'uv add httpx'", [], id="quoted text is not a command"),
+        pytest.param(
+            "UV_NO_SYNC=1 uv add httpx", [("uv", False)], id="leading assignment"
+        ),
+        pytest.param(
+            "uv --project services/api add httpx",
+            [("uv", False)],
+            id="global option before the verb",
+        ),
+        pytest.param("pnpm --filter web add zod", [("pnpm", False)], id="pnpm filter"),
+        pytest.param("pnpm -C web add zod", [("pnpm", False)], id="pnpm dir"),
+        pytest.param(
+            "pnpm install --filter web --frozen-lockfile",
+            [],
+            id="filter value is not a package",
+        ),
+        pytest.param(
+            "uv add --no-build --script=tool.py httpx",
+            [("uv", True)],
+            id="script with equals",
+        ),
+        pytest.param(
+            "env -u VIRTUAL_ENV uv add httpx", [("uv", False)], id="env with options"
+        ),
+        pytest.param(
+            "sudo -u builder uv add httpx", [("uv", False)], id="sudo with options"
+        ),
+        pytest.param(
+            "uv add -r requirements.txt", [("uv", False)], id="uv requirements file"
+        ),
+        pytest.param(
+            "npm install lodash --package-lock-only=false",
+            [("npm", False)],
+            id="lock-only flag set false",
+        ),
+        pytest.param(
+            "uv add -rrequirements.txt",
+            [("uv", False)],
+            id="attached requirements file",
+        ),
+        pytest.param(
+            "npm install lodash --package-lock-only --package-lock-only=false",
+            [("npm", False)],
+            id="later flag overrides earlier",
+        ),
+        pytest.param(
+            "npm install lodash --package-lock-only --no-package-lock-only",
+            [("npm", False)],
+            id="npm negated flag",
+        ),
+        pytest.param(
+            "npm install lodash --package-lock-only false",
+            [("npm", False)],
+            id="npm boolean value as the next word",
+        ),
+        pytest.param(
+            "npm install lodash --package-lock-only true",
+            [("npm", True)],
+            id="npm true is not a package",
+        ),
+        pytest.param(
+            "pnpm add --ignore-scripts false",
+            [("pnpm", False)],
+            id="pnpm reads false after an option as a package",
+        ),
+        pytest.param(
+            "npm install -- false", [("npm", False)], id="words after -- are packages"
+        ),
+        pytest.param(
+            "uv add --requirements=false",
+            [("uv", False)],
+            id="requirements file named false",
+        ),
+        pytest.param(
+            "uv add --no-sync --no-build --build httpx",
+            [("uv", False)],
+            id="uv build re-enabled",
+        ),
+    ],
+)
+def test_package_adds(command: str, expected: list[tuple[str, bool]]) -> None:
+    adds = adoption_hook.package_adds(command)
+
+    assert [(a.tool, a.lock_only) for a in adds] == expected
+
+
+@pytest.mark.parametrize(
+    ("lock_only", "first", "expected"),
+    [
+        pytest.param(True, True, "load the dependency-adoption skill", id="first add"),
+        pytest.param(False, False, "would install", id="later installing add"),
+        pytest.param(True, False, None, id="later lock-only add"),
+    ],
+)
+def test_verdict(lock_only: bool, first: bool, expected: str | None) -> None:
+    message = adoption_hook.verdict(
+        [adoption_hook.PackageAdd(tool="uv", lock_only=lock_only)],
+        first_in_session=first,
+    )
+
+    assert message is None if expected is None else expected in (message or "")
