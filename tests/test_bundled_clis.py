@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.14"
+# requires-python = ">=3.15"
 # dependencies = ["pytest>=8.3"]
 # ///
 """Run every bundled script's own command help, which importing it never reaches.

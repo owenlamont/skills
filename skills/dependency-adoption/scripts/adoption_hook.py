@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.14"
+# requires-python = ">=3.14,<3.15"
 # dependencies = [
 #     "orjson>=3.12.0",
 #     "tree-sitter>=0.26.0",

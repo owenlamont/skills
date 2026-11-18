@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.14"
+# requires-python = ">=3.15"
 # dependencies = [
 #     "markdown-it-py>=4.2.0",
 #     "mdit-py-plugins>=0.6.1",
