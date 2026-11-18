@@ -51,6 +51,8 @@ _LOCK_ONLY: Final = {
     "pnpm": frozenset({"--lockfile-only"}),
     "npm": frozenset({"--package-lock-only"}),
 }
+_REQUIREMENTS_FILES: Final = frozenset({"-r", "--requirements"})
+_FALSE_VALUES: Final = frozenset({"false", "0", "no"})
 # Options whose value is the next word, so the value is neither the verb nor a package.
 _VALUE_OPTIONS: Final = {
     "uv": frozenset(
@@ -90,13 +92,13 @@ _MARKERS: Final = Path(tempfile.gettempdir()) / "dependency-adoption-hook"
 _LOAD_SKILL: Final = (
     "Blocked by the dependency-adoption hook: load the dependency-adoption skill "
     "before adding a dependency, then follow it — lock without installing "
-    "(`uv add --no-sync`, `pnpm add --lockfile-only`, "
+    "(`uv add --no-sync --no-build`, `pnpm add --lockfile-only`, "
     "`npm install --package-lock-only`), assess the locked version, and install "
     "only once it passes."
 )
 _LOCK_FIRST: Final = (
     "Blocked by the dependency-adoption hook: this add would install before the "
-    "dependency is assessed. Lock without installing (`uv add --no-sync`, "
+    "dependency is assessed. Lock without installing (`uv add --no-sync --no-build`, "
     "`pnpm add --lockfile-only`, `npm install --package-lock-only`), assess the "
     "locked version with the skill's script, then install."
 )
@@ -141,8 +143,11 @@ def _as_add(words: list[str]) -> PackageAdd | None:
         return None
     tool = words[0].rsplit("/", maxsplit=1)[-1]
     verb, *packages = _positionals(tool, words[1:]) or [""]
-    flags = {word.partition("=")[0] for word in words if word.startswith("-")}
-    if verb not in _ADD_VERBS.get(tool, frozenset()) or not packages:
+    options = [word.partition("=") for word in words if word.startswith("-")]
+    flags = {name for name, _, value in options if value.lower() not in _FALSE_VALUES}
+    if verb not in _ADD_VERBS.get(tool, frozenset()):
+        return None
+    if not packages and not (tool == "uv" and flags & _REQUIREMENTS_FILES):
         return None
     return PackageAdd(
         tool=tool, lock_only=bool(_LOCK_ONLY.get(tool, frozenset()) & flags)

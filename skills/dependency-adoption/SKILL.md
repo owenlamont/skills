@@ -37,8 +37,8 @@ bundled script collects the facts, you write the judgement, and both go in the P
 ## Collect the evidence record
 
 The script covers PyPI, npm and GitHub Actions, reusable workflows included. **Lock
-before you install, so no unreviewed code runs:** `uv add --no-sync <name>` or
-`pnpm add --lockfile-only <name>`, then assess the version the lockfile resolved, and
+before you install, so no unreviewed code runs:** `uv add --no-sync --no-build <name>`
+or `pnpm add --lockfile-only <name>`, then assess the version the lockfile resolved, and
 install only once it passes. Paste the output into the PR body; the output is a
 collapsed `<details>` table, so the visible body carries only your judgement lines:
 
@@ -52,6 +52,11 @@ GH_TOKEN=$(gh auth token) uv run --script <skill-dir>/scripts/assess_dependency.
   approved (see *Exceptions*). The exit status is 1 when anything fails.
 - **`review` needs a sentence in the PR** saying what you checked and why it is
   acceptable.
+- **`uv add --no-build` failing for want of a wheel means resolving would run the
+  package's build backend.** Read its source before locking without `--no-build`.
+- **The licence row grades code as bundled.** Ignore it for a tool run as a separate
+  process; for weak copyleft that ships to a browser or a customer, its `review` is a
+  `fail` until an exception is approved.
 - Run the script on public packages only: it sends the name to PyPI, npm, OSV and
   GitHub.
 - **New transitive packages in the lockfile diff owe the licence gate and the

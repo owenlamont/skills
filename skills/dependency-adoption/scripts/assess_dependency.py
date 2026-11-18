@@ -444,6 +444,12 @@ def _is_pinned(uses: str) -> bool:
 
 
 def _execution_check(facts: ActionFacts) -> Check:
+    if facts.runs_using is None:
+        return Check(
+            name="execution",
+            verdict=Verdict.REVIEW,
+            detail="no readable manifest at the pinned path: check the path exists",
+        )
     image = facts.docker_image
     if facts.runs_using == "docker" and image:
         if not image.startswith("docker://"):
@@ -468,9 +474,7 @@ def _execution_check(facts: ActionFacts) -> Check:
             verdict=Verdict.REVIEW,
             detail=f"{facts.runs_using}, nested unpinned: {', '.join(unpinned)}",
         )
-    return Check(
-        name="execution", verdict=Verdict.INFO, detail=facts.runs_using or "unknown"
-    )
+    return Check(name="execution", verdict=Verdict.INFO, detail=facts.runs_using)
 
 
 def _commit_cooldown_check(committed: datetime | None, now: datetime) -> Check:
@@ -804,7 +808,11 @@ def fetch_action(client: httpx.Client, reference: str) -> ActionFacts:
         resolved_sha=sha,
         committed=committed,
         archived=meta.get("archived", False),
-        runs_using="reusable workflow" if workflow else runs.get("using"),
+        runs_using=None
+        if not manifest
+        else "reusable workflow"
+        if workflow
+        else runs.get("using"),
         docker_image=runs.get("image") if runs.get("using") == "docker" else None,
         licence=(meta.get("license") or {}).get("spdx_id"),
         release=release,

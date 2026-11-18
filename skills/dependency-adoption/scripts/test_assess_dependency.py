@@ -205,6 +205,7 @@ def test_tag_reference_fails_and_suggests_the_full_path_pin(action_facts: Any) -
     ("overrides", "expected"),
     [
         pytest.param({}, "INFO", id="javascript action"),
+        pytest.param({"runs_using": None}, "REVIEW", id="no manifest at the path"),
         pytest.param(
             {"runs_using": "docker", "docker_image": "docker://alpine:3.22"},
             "REVIEW",

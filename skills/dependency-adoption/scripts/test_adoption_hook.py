@@ -52,6 +52,14 @@ import pytest
         pytest.param(
             "sudo -u builder uv add httpx", [("uv", False)], id="sudo with options"
         ),
+        pytest.param(
+            "uv add -r requirements.txt", [("uv", False)], id="uv requirements file"
+        ),
+        pytest.param(
+            "npm install lodash --package-lock-only=false",
+            [("npm", False)],
+            id="lock-only flag set false",
+        ),
     ],
 )
 def test_package_adds(command: str, expected: list[tuple[str, bool]]) -> None:
