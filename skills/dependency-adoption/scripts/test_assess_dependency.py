@@ -522,3 +522,89 @@ def test_skill_names_every_licence_the_script_grades() -> None:
     )
 
     assert {name for name in graded if f"`{name}`" not in skill} == set()
+
+
+def test_licence_ref_is_reviewed_even_beside_a_permissive_classifier() -> None:
+    check = assess_dependency.licence_check(
+        expression="LicenseRef-Proprietary",
+        classifiers=("License :: OSI Approved :: MIT License",),
+        text=None,
+    )
+
+    assert check.verdict.name == "REVIEW"
+
+
+def _github(routes: dict[str, httpx.Response]) -> httpx.Client:
+    return httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: routes.get(
+                request.url.path, httpx.Response(httpx.codes.NOT_FOUND)
+            )
+        )
+    )
+
+
+def test_tag_date_falls_back_to_the_annotation_when_the_release_has_no_date() -> None:
+    tags = "/repos/octo/action/git"
+    client = _github(
+        {
+            "/repos/octo/action/releases/tags/v1.2.3": httpx.Response(
+                200, json={"published_at": None}
+            ),
+            f"{tags}/ref/tags/v1.2.3": httpx.Response(
+                200, json={"object": {"type": "tag", "sha": "a1"}}
+            ),
+            f"{tags}/tags/a1": httpx.Response(
+                200, json={"tagger": {"date": "2029-12-31T00:00:00Z"}}
+            ),
+        }
+    )
+
+    released = assess_dependency.tag_date(client, repo="octo/action", tag="v1.2.3")
+
+    assert released == datetime(2029, 12, 31, tzinfo=UTC)
+
+
+def test_tag_date_raises_when_github_refuses_the_lookup() -> None:
+    client = _github(
+        {"/repos/octo/action/releases/tags/v1.2.3": httpx.Response(403, json={})}
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        assess_dependency.tag_date(client, repo="octo/action", tag="v1.2.3")
+
+
+def test_action_advisories_are_queried_under_the_canonical_repository_name() -> None:
+    sha = _CHECKOUT_SHA
+    path = ".github/actions/filter-test-configs"
+    repo = "/repos/pytorch/pytorch"
+    routes = {
+        "/repos/PyTorch/PyTorch": httpx.Response(
+            200, json={"full_name": "pytorch/pytorch"}
+        ),
+        f"{repo}/commits/{sha}": httpx.Response(200, json={"sha": sha}),
+        f"{repo}/contents/{path}/action.yml": httpx.Response(
+            200, text="runs:\n  using: composite\n"
+        ),
+        f"{repo}/tags": httpx.Response(
+            200, json=[{"name": "v2.0.0", "commit": {"sha": sha}}]
+        ),
+    }
+    advisory = _load("osv_GHSA-hw6r-g8gj-2987.json")
+    osv = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: (
+                httpx.Response(200, json={"vulns": [advisory]})
+                if orjson.loads(request.content)["package"]["name"]
+                == advisory["affected"][0]["package"]["name"]
+                else httpx.Response(200, json={})
+            )
+        )
+    )
+
+    with _github(routes) as github, osv:
+        facts = assess_dependency.fetch_action(
+            github, f"PyTorch/PyTorch/{path}@{sha}", osv=osv
+        )
+
+    assert facts.vulnerabilities == ("GHSA-hw6r-g8gj-2987",)

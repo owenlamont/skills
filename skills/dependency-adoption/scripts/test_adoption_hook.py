@@ -84,6 +84,26 @@ import pytest
             [("npm", False)],
             id="npm negated flag",
         ),
+        pytest.param(
+            "npm install lodash --package-lock-only false",
+            [("npm", False)],
+            id="npm boolean value as the next word",
+        ),
+        pytest.param(
+            "npm install lodash --package-lock-only true",
+            [("npm", True)],
+            id="npm true is not a package",
+        ),
+        pytest.param(
+            "uv add --requirements=false",
+            [("uv", False)],
+            id="requirements file named false",
+        ),
+        pytest.param(
+            "uv add --no-sync --no-build --build httpx",
+            [("uv", False)],
+            id="uv build re-enabled",
+        ),
     ],
 )
 def test_package_adds(command: str, expected: list[tuple[str, bool]]) -> None:

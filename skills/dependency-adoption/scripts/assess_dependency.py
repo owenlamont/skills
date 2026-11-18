@@ -250,6 +250,12 @@ def licence_check(
 
     ``OR`` takes the best option, since we may choose it; ``AND`` takes the worst.
     """
+    if expression and "LicenseRef-" in expression:
+        return _licence(
+            Verdict.REVIEW,
+            f"custom licence `{expression[:80]}`: read the LICENSE file in the source "
+            "repository",
+        )
     found = (
         _expression_check(expression)
         or _classifier_check(classifiers)
@@ -812,6 +818,7 @@ def fetch_action(
     meta = orjson.loads(
         client.get(f"{GITHUB_API}/repos/{repo}").raise_for_status().content
     )
+    repo = meta.get("full_name") or repo
     commit = client.get(f"{GITHUB_API}/repos/{repo}/commits/{ref}")
     commit_body = orjson.loads(commit.content) if commit.is_success else {}
     sha = commit_body.get("sha")
@@ -851,7 +858,7 @@ def fetch_action(
         docker_image=runs.get("image") if runs.get("using") == "docker" else None,
         licence=(meta.get("license") or {}).get("spdx_id"),
         release=release,
-        released=None if tag is None else _tag_date(client, repo=repo, tag=tag),
+        released=None if tag is None else tag_date(client, repo=repo, tag=tag),
         vulnerabilities=_action_vulnerabilities(
             osv, packages=osv_package_names(repo=repo, path=path), release=release
         ),
@@ -891,24 +898,32 @@ def _release_tag(client: httpx.Client, *, repo: str, sha: str | None) -> str | N
     return max(tags, key=lambda name: _specificity(tags[name]))
 
 
-def _tag_date(client: httpx.Client, *, repo: str, tag: str) -> datetime | None:
+def tag_date(client: httpx.Client, *, repo: str, tag: str) -> datetime | None:
     """Return when ``tag`` was published: its release, else its annotation.
 
-    ``None`` for a lightweight tag with no release, which leaves the commit date.
+    ``None`` for a lightweight tag with no published release, which leaves the commit
+    date to grade.
+
+    Raises
+    ------
+    httpx.HTTPStatusError
+        When GitHub answers a lookup with anything but success or 404, so a failed
+        lookup cannot pass the cooldown on the older commit date.
     """
     release = client.get(f"{GITHUB_API}/repos/{repo}/releases/tags/{tag}")
-    if release.is_success:
-        return _timestamp(orjson.loads(release.content).get("published_at"))
+    if release.status_code != httpx.codes.NOT_FOUND:
+        body = orjson.loads(release.raise_for_status().content)
+        if (published := _timestamp(body.get("published_at"))) is not None:
+            return published
     ref = client.get(f"{GITHUB_API}/repos/{repo}/git/ref/tags/{tag}")
-    if not ref.is_success:
+    if ref.status_code == httpx.codes.NOT_FOUND:
         return None
-    target = orjson.loads(ref.content).get("object", {})
+    target = orjson.loads(ref.raise_for_status().content).get("object", {})
     if target.get("type") != "tag":
         return None
     annotation = client.get(f"{GITHUB_API}/repos/{repo}/git/tags/{target['sha']}")
-    if not annotation.is_success:
-        return None
-    return _timestamp(orjson.loads(annotation.content).get("tagger", {}).get("date"))
+    tagger = orjson.loads(annotation.raise_for_status().content).get("tagger", {})
+    return _timestamp(tagger.get("date"))
 
 
 def _in_range(version: Version, events: Iterable[Mapping[str, str]]) -> bool:

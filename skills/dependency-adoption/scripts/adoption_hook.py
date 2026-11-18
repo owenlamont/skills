@@ -59,6 +59,8 @@ _LOCK_ONLY: Final = {
 _NEGATABLE: Final = frozenset({"pnpm", "npm"})
 _REQUIREMENTS_FILES: Final = frozenset({"-r", "--requirements"})
 _FALSE_VALUES: Final = frozenset({"false", "0", "no"})
+# npm and pnpm read a bare `true` or `false` after a boolean option as its value.
+_BOOLEAN_WORDS: Final = frozenset({"true", "false"})
 # Options whose value is the next word, so the value is neither the verb nor a package.
 _VALUE_OPTIONS: Final = {
     "uv": frozenset(
@@ -130,18 +132,10 @@ def _words(segment: str) -> list[str]:
     return words
 
 
-def _positionals(tool: str, words: list[str]) -> list[str]:
-    takes_value = _VALUE_OPTIONS.get(tool, frozenset())
-    positionals = []
-    skip_next = False
-    for word in words:
-        if skip_next:
-            skip_next = False
-        elif word.startswith("-"):
-            skip_next = "=" not in word and word in takes_value
-        else:
-            positionals.append(word)
-    return positionals
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ParsedArgs:
+    positionals: tuple[str, ...]
+    flags: frozenset[str]
 
 
 def _option_name(tool: str, word: str) -> str:
@@ -151,30 +145,60 @@ def _option_name(tool: str, word: str) -> str:
     return word.partition("=")[0]
 
 
-def _enabled_flags(tool: str, words: list[str]) -> frozenset[str]:
-    """Return the options left on once every word is applied in order.
+def _switch(tool: str, word: str, name: str, enabled: dict[str, bool]) -> None:
+    """Record a boolean option, letting a later setting override an earlier one."""
+    if tool in _NEGATABLE and name.startswith("--no-"):
+        enabled[f"--{name.removeprefix('--no-')}"] = False
+        return
+    if tool not in _NEGATABLE and not name.startswith("--no-"):
+        enabled[f"--no-{name.removeprefix('--')}"] = False
+    enabled[name] = word.partition("=")[2].lower() not in _FALSE_VALUES
 
-    A later ``--flag=false``, or ``--no-flag`` for npm and pnpm, turns off an earlier
-    ``--flag``.
+
+def parse_args(tool: str, words: list[str]) -> ParsedArgs:
+    """Split the words after the tool into positionals and the options left on.
+
+    Words are applied in order, as the tools do: an option's value is never a
+    positional, a later ``--flag=false`` (or npm and pnpm's ``--flag false`` and
+    ``--no-flag``) turns an earlier ``--flag`` off, and uv's ``--build`` cancels an
+    earlier ``--no-build``.
     """
+    takes_value = _VALUE_OPTIONS.get(tool, frozenset())
+    positionals: list[str] = []
     enabled: dict[str, bool] = {}
+    pending_value = False
+    last_boolean: str | None = None
     for word in words:
-        if not word.startswith("-"):
-            continue
-        name = _option_name(tool, word)
-        if tool in _NEGATABLE and name.startswith("--no-"):
-            enabled[f"--{name.removeprefix('--no-')}"] = False
+        if pending_value:
+            pending_value = False
+        elif not word.startswith("-"):
+            if last_boolean is not None and word in _BOOLEAN_WORDS:
+                enabled[last_boolean] = word == "true"
+            else:
+                positionals.append(word)
+        elif (name := _option_name(tool, word)) in takes_value:
+            enabled[name] = True
+            pending_value = name == word
         else:
-            enabled[name] = word.partition("=")[2].lower() not in _FALSE_VALUES
-    return frozenset(name for name, on in enabled.items() if on)
+            _switch(tool, word, name, enabled)
+        last_boolean = (
+            word
+            if tool in _NEGATABLE and word.startswith("--") and "=" not in word
+            else None
+        )
+    return ParsedArgs(
+        positionals=tuple(positionals),
+        flags=frozenset(name for name, on in enabled.items() if on),
+    )
 
 
 def _as_add(words: list[str]) -> PackageAdd | None:
     if not words:
         return None
     tool = words[0].rsplit("/", maxsplit=1)[-1]
-    verb, *packages = _positionals(tool, words[1:]) or [""]
-    flags = _enabled_flags(tool, words[1:])
+    parsed = parse_args(tool, words[1:])
+    verb, *packages = parsed.positionals or ("",)
+    flags = parsed.flags
     if verb not in _ADD_VERBS.get(tool, frozenset()):
         return None
     if not packages and not (tool == "uv" and flags & _REQUIREMENTS_FILES):

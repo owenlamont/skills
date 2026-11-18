@@ -37,9 +37,10 @@ bundled script collects the facts, you write the judgement, and both go in the P
 ## Collect the evidence record
 
 The script covers PyPI, npm and GitHub Actions, reusable workflows included. **Lock
-before you install, so no unreviewed code runs:** `uv add --no-sync --no-build <name>`,
-`uv add --no-build --script <file> <name>` for a PEP 723 script, or
-`pnpm add --lockfile-only <name>`, then assess the version the lockfile resolved, and
+before you install, so no unreviewed code runs:** `uv add --no-sync --no-build <name>`;
+for a PEP 723 script, `uv add --no-build --script <file> <name>` then
+`uv lock --no-build --script <file>`, since the add alone writes no lock; or
+`pnpm add --lockfile-only <name>`. Then assess the version the lockfile resolved, and
 install only once it passes. Paste the output into the PR body; the output is a
 collapsed `<details>` table, so the visible body carries only your judgement lines:
 
@@ -53,10 +54,11 @@ GH_TOKEN=$(gh auth token) uv run --script <skill-dir>/scripts/assess_dependency.
   approved (see *Exceptions*). The exit status is 1 when anything fails.
 - **`review` needs a sentence in the PR** saying what you checked and why it is
   acceptable.
-- **`--no-build` keeps non-editable registry packages from running code**, and fails
-  rather than build one that ships no wheel. A local, editable or Git dependency is
-  source to review before resolving: `--no-build` refuses one with dynamic metadata,
-  and resolving it without the flag runs its build backend.
+- **`--no-build` covers non-editable registry packages only**: it fails rather than
+  build one that ships no wheel. uv still builds the project itself and its workspace
+  members to read dynamic metadata, and refuses a local, editable or Git dependency
+  with dynamic metadata, which runs its build backend once the flag is dropped. Review
+  any of those as source before resolving.
 - **The licence row grades code as bundled.** Ignore it for a tool run as a separate
   process; for weak copyleft that ships to a browser or a customer, its `review` is a
   `fail` until an exception is approved.
@@ -137,8 +139,9 @@ Write one line for each that applies. None is a reason to reject alone.
 - **PyPI project:** a `uv.lock` committed and checked with `uv sync --locked`;
   `[tool.uv] exclude-newer = "1 week"` in `pyproject.toml`.
 - **PEP 723 script:** the same `[tool.uv] exclude-newer = "1 week"` inside the
-  script's metadata block. Once a script dependency has been assessed, lock it with
-  `uv lock --no-build --script <file>` and commit the `<file>.lock` it writes.
+  script's metadata block. Keep the `<file>.lock` that `uv lock --no-build --script`
+  wrote for the assessment, commit it beside the script, and run the script with
+  `uv run --locked --script <file>`.
 - **npm/pnpm:** `pnpm-lock.yaml` committed and installed with `--frozen-lockfile`;
   `minimumReleaseAge: 10080` (minutes) and `trustPolicy: no-downgrade` in
   `pnpm-workspace.yaml`.
