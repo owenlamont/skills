@@ -115,6 +115,7 @@ import pytest
         pytest.param("uv add --help requests", [], id="uv help names a package"),
         pytest.param("pnpm add -h zod", [], id="pnpm short help"),
         pytest.param("npm install --dry-run lodash", [], id="npm dry run"),
+        pytest.param("npm install --usage lodash", [], id="npm usage"),
         pytest.param(
             "npm install --dry-run false lodash",
             [("npm", False)],
