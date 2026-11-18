@@ -38,7 +38,8 @@ and its error lists the commands the package does ship, so read that rather than
   `uv add --dev`/`--group` write to), not `[project.optional-dependencies]`.
 
 This section is about how a dependency is declared. Whether to take one on at all is
-`python-libraries`' *Choosing and maintaining a dependency*.
+`dependency-adoption`'s call, and `python-libraries` names the preferred library for a
+task.
 
 ## Updating and pinning
 
@@ -48,8 +49,8 @@ This section is about how a dependency is declared. Whether to take one on at al
   them to be reverted.
 - Verify the lockfile is current in CI with `uv sync --locked` (or `uv lock --check`).
 - Pin only lower bounds in `pyproject.toml` (no upper bound without a documented
-  reason), and pin Docker base images to a patch-level tag (e.g. `python:3.13.1`, not
-  `python:3.13`).
+  reason). Pin Docker base images to a patch-level tag plus its digest
+  (`python:3.14.1-slim@sha256:<digest>`); `dependency-adoption` has the image rule.
 
 ## Choosing the Python version
 
@@ -71,6 +72,9 @@ For a one-off script outside the project, declare deps inline with
 ```python
 # /// script
 # dependencies = ["httpx2"]
+#
+# [tool.uv]
+# exclude-newer = "1 week"
 # ///
 import httpx2
 ```

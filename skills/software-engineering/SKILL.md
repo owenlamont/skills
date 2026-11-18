@@ -316,7 +316,8 @@ Confirming the direction with the human before writing code is `docs`'s
   genuinely hard problem; adding one to avoid writing ten obvious lines is a poor trade.
   The same measure cuts the other way, so it is not an argument for hand-rolling: a
   maintained library beats reimplementing a solved problem, and for Python
-  `python-libraries` names which cases those are.
+  `python-libraries` names which cases those are. Whether a specific package is fit to
+  adopt is `dependency-adoption`'s call.
 - **Use a maintained implementation wherever correctness depends on specialised
   knowledge, however short a hand-rolled version looks.** The tells: implementing an
   external standard and its compatibility rules (Unicode, time zones, a wire protocol);

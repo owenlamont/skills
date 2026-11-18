@@ -1,0 +1,54 @@
+{
+  "info": {
+    "name": "frozendict",
+    "version": "2.5.1",
+    "license": null,
+    "license_expression": "LGPL-3.0-only",
+    "classifiers": [
+      "Development Status :: 5 - Production/Stable",
+      "Intended Audience :: Developers",
+      "Natural Language :: English",
+      "Operating System :: OS Independent",
+      "Programming Language :: Python :: 3 :: Only",
+      "Programming Language :: Python :: 3.10",
+      "Programming Language :: Python :: 3.11",
+      "Programming Language :: Python :: 3.12",
+      "Programming Language :: Python :: 3.13",
+      "Programming Language :: Python :: 3.14",
+      "Programming Language :: Python :: 3.15",
+      "Programming Language :: Python :: 3.6",
+      "Programming Language :: Python :: 3.7",
+      "Programming Language :: Python :: 3.8",
+      "Programming Language :: Python :: 3.9",
+      "Topic :: Software Development :: Libraries",
+      "Topic :: Software Development :: Libraries :: Python Modules",
+      "Topic :: Utilities"
+    ],
+    "project_urls": {
+      "Bug Reports": "https://github.com/Marco-Sulla/python-frozendict/issues",
+      "Homepage": "https://github.com/Marco-Sulla/python-frozendict",
+      "Source": "https://github.com/Marco-Sulla/python-frozendict"
+    },
+    "home_page": "https://github.com/Marco-Sulla/python-frozendict"
+  },
+  "urls": [
+    {
+      "filename": "frozendict-2.5.1-cp310-cp310-macosx_10_9_universal2.whl",
+      "packagetype": "bdist_wheel",
+      "upload_time_iso_8601": "2026-10-30T20:35:55.662393Z",
+      "yanked": false
+    },
+    {
+      "filename": "frozendict-2.5.1-cp310-cp310-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl",
+      "packagetype": "bdist_wheel",
+      "upload_time_iso_8601": "2026-10-30T20:35:57.088750Z",
+      "yanked": false
+    },
+    {
+      "filename": "frozendict-2.5.1-cp310-cp310-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
+      "packagetype": "bdist_wheel",
+      "upload_time_iso_8601": "2026-10-30T20:35:58.446063Z",
+      "yanked": false
+    }
+  ]
+}
