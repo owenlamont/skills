@@ -60,7 +60,10 @@ _NEGATABLE: Final = frozenset({"pnpm", "npm"})
 _REQUIREMENTS_FILES: Final = frozenset({"-r", "--requirements"})
 _FALSE_VALUES: Final = frozenset({"false", "0", "no"})
 # npm reads a bare `true` or `false` after these options as the value; pnpm does not.
-_BARE_BOOLEAN_OPTIONS: Final = {"npm": frozenset({"--package-lock-only"})}
+_BARE_BOOLEAN_OPTIONS: Final = {"npm": frozenset({"--package-lock-only", "--dry-run"})}
+# Options under which the tool prints help or reports a plan, and installs nothing.
+_HELP: Final = frozenset({"-h", "--help"})
+_DRY_RUN: Final = {"npm": frozenset({"--dry-run"})}
 _BOOLEAN_WORDS: Final = frozenset({"true", "false"})
 # Options whose value is the next word, so the value is neither the verb nor a package.
 _VALUE_OPTIONS: Final = {
@@ -200,6 +203,8 @@ def _as_add(words: list[str]) -> PackageAdd | None:
     if verb not in _ADD_VERBS.get(tool, frozenset()):
         return None
     if not packages and not (tool == "uv" and flags & _REQUIREMENTS_FILES):
+        return None
+    if flags & (_HELP | _DRY_RUN.get(tool, frozenset())):
         return None
     lock_only = any(required <= flags for required in _LOCK_ONLY.get(tool, ()))
     return PackageAdd(tool=tool, lock_only=lock_only)
