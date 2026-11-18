@@ -252,9 +252,9 @@ def compile_error(path: pathlib.Path, floor: str) -> str | None:
 def entry_points() -> list[pathlib.Path]:
     """Every script this repo ships that an agent or a human runs directly.
 
-    Found by what the file *is* -- a `uv run --script` shebang, or PEP 723 metadata --
-    rather than by which directory holds it, so a new skill's scripts are covered
-    the day they land, not the day someone remembers to add the directory here.
+    Every file directly under a skill's `scripts/`, whatever it looks like; elsewhere,
+    whatever has a `uv run --script` shebang or PEP 723 metadata, so a script outside
+    the skills is covered the day it lands rather than when its directory is listed.
 
     Two things keep that from over-reaching, and both were holes: the list comes from
     `git ls-files`, so an untracked scratch script in the working tree cannot fail a
