@@ -36,9 +36,8 @@ uv run python -c "import pathlib, subprocess; p = pathlib.Path(subprocess.run(['
 prek run --all-files
 ```
 
-- It auto-fixes many issues; if a run reports changed files, run it again (some first-run
-  failures are already fixed).
-- Fix issues by hand only when a run reports no file changes but still fails.
+- Rerun prek after hooks rewrite files (some first-run failures are already fixed).
+- Hand-fix remaining failures once a run makes no file changes.
 - It only scans git-tracked files — `git add` new files first.
 
 ## What the toolchain enforces

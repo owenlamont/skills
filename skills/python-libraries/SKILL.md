@@ -131,9 +131,9 @@ less to maintain and less to get wrong than reinventing a solved problem.
   `TypeError` announces itself, so fix the data at the call site — stringify the keys,
   or carry the big integer as a string — rather than swapping library for the whole
   payload.
-- When a Pydantic model is involved, go straight to and from JSON bytes with
-  `Model.model_validate_json(raw)` and `model.model_dump_json()` — one fast
-  parse-and-validate pass.
+- When a Pydantic model is involved, skip the intermediate dict: parse with
+  `Model.model_validate_json(raw)` (`str`, `bytes` or `bytearray`) and serialise with
+  `model.model_dump_json()`, which returns `str` — `.encode()` it where bytes are needed.
 - Don't call an HTTP response's `.json()` and hand the resulting dict to Pydantic: that
   parses twice (the client builds a dict, then Pydantic re-validates it). Pass the raw
   bytes (`response.content`) to `Model.model_validate_json(...)` instead.
