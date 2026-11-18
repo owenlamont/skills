@@ -61,5 +61,5 @@ idioms" rule in `python-code-style` with Pandas specifics.
   to force `DataFrame[Model]` onto it, and don't leave the contract implicit.
 - Give each schema model its own module, and keep the raw (as-ingested) schema in a
   separate module from the processed (validated or derived) one.
-- Back categorical columns with a `Category` dtype built from an `Enum`'s values (iterate
-  the Enum to build the categories), and annotate timestamp columns as `pd.Timestamp`.
+- Back categorical columns with a `Category` dtype built by iterating an `Enum` and
+  collecting each member's `.value`; annotate timestamp columns as `pd.Timestamp`.
