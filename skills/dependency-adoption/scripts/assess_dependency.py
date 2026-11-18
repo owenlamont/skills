@@ -770,7 +770,9 @@ def fetch_npm(client: httpx.Client, *, name: str, version: str | None) -> Packag
     )
 
 
-def fetch_action(client: httpx.Client, reference: str) -> ActionFacts:
+def fetch_action(
+    client: httpx.Client, reference: str, *, osv: httpx.Client
+) -> ActionFacts:
     """Resolve an Action reference and read its manifest at the resolved commit."""
     parsed = parse_reference(reference)
     repo, path, ref = parsed.repo, parsed.path, parsed.ref
@@ -816,7 +818,7 @@ def fetch_action(client: httpx.Client, reference: str) -> ActionFacts:
         docker_image=runs.get("image") if runs.get("using") == "docker" else None,
         licence=(meta.get("license") or {}).get("spdx_id"),
         release=release,
-        vulnerabilities=_action_vulnerabilities(client, repo=repo, release=release),
+        vulnerabilities=_action_vulnerabilities(osv, repo=repo, release=release),
         nested_uses=_workflow_uses(manifest) if workflow else _step_uses(runs),
     )
 
@@ -1037,8 +1039,8 @@ def npm(*, name: str, version: VersionOption = None) -> None:
 @app.command()
 def action(reference: str) -> None:
     """Assess a GitHub Action reference, written as it appears after `uses:`."""
-    with _client(github=True) as client:
-        facts = fetch_action(client, reference)
+    with _client(github=True) as client, _client() as osv:
+        facts = fetch_action(client, reference, osv=osv)
     _emit(f"action {reference}", evaluate_action(facts, datetime.now(UTC)))
 
 
