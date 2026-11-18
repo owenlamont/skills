@@ -112,6 +112,23 @@ import pytest
             [("uv", False)],
             id="uv build re-enabled",
         ),
+        pytest.param("uv add --help requests", [], id="uv help names a package"),
+        pytest.param("pnpm add -h zod", [], id="pnpm short help"),
+        pytest.param("npm install --dry-run lodash", [], id="npm dry run"),
+        pytest.param("npm install --usage lodash", [], id="npm usage"),
+        pytest.param(
+            "npm install --dry-run false lodash",
+            [("npm", False)],
+            id="npm dry run turned off by a bare false",
+        ),
+        pytest.param(
+            "npm install --dry-run --dry-run=false lodash",
+            [("npm", False)],
+            id="npm dry run turned off by a later setting",
+        ),
+        pytest.param(
+            "uv add --dry-run httpx", [("uv", False)], id="uv add has no dry run"
+        ),
     ],
 )
 def test_package_adds(command: str, expected: list[tuple[str, bool]]) -> None:
