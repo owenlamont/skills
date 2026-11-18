@@ -95,6 +95,14 @@ import pytest
             id="npm true is not a package",
         ),
         pytest.param(
+            "pnpm add --ignore-scripts false",
+            [("pnpm", False)],
+            id="pnpm reads false after an option as a package",
+        ),
+        pytest.param(
+            "npm install -- false", [("npm", False)], id="words after -- are packages"
+        ),
+        pytest.param(
             "uv add --requirements=false",
             [("uv", False)],
             id="requirements file named false",

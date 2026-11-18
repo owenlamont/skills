@@ -59,7 +59,8 @@ _LOCK_ONLY: Final = {
 _NEGATABLE: Final = frozenset({"pnpm", "npm"})
 _REQUIREMENTS_FILES: Final = frozenset({"-r", "--requirements"})
 _FALSE_VALUES: Final = frozenset({"false", "0", "no"})
-# npm and pnpm read a bare `true` or `false` after a boolean option as its value.
+# npm reads a bare `true` or `false` after these options as the value; pnpm does not.
+_BARE_BOOLEAN_OPTIONS: Final = {"npm": frozenset({"--package-lock-only"})}
 _BOOLEAN_WORDS: Final = frozenset({"true", "false"})
 # Options whose value is the next word, so the value is neither the verb nor a package.
 _VALUE_OPTIONS: Final = {
@@ -159,15 +160,16 @@ def parse_args(tool: str, words: list[str]) -> ParsedArgs:
     """Split the words after the tool into positionals and the options left on.
 
     Words are applied in order, as the tools do: an option's value is never a
-    positional, a later ``--flag=false`` (or npm and pnpm's ``--flag false`` and
-    ``--no-flag``) turns an earlier ``--flag`` off, and uv's ``--build`` cancels an
-    earlier ``--no-build``.
+    positional, a later ``--flag=false`` (or npm's ``--package-lock-only false``, or
+    npm and pnpm's ``--no-flag``) turns an earlier ``--flag`` off, and uv's
+    ``--build`` cancels an earlier ``--no-build``.
     """
     takes_value = _VALUE_OPTIONS.get(tool, frozenset())
     positionals: list[str] = []
     enabled: dict[str, bool] = {}
     pending_value = False
     last_boolean: str | None = None
+    bare_booleans = _BARE_BOOLEAN_OPTIONS.get(tool, frozenset())
     for word in words:
         if pending_value:
             pending_value = False
@@ -181,11 +183,7 @@ def parse_args(tool: str, words: list[str]) -> ParsedArgs:
             pending_value = name == word
         else:
             _switch(tool, word, name, enabled)
-        last_boolean = (
-            word
-            if tool in _NEGATABLE and word.startswith("--") and "=" not in word
-            else None
-        )
+        last_boolean = word if word in bare_booleans else None
     return ParsedArgs(
         positionals=tuple(positionals),
         flags=frozenset(name for name, on in enabled.items() if on),

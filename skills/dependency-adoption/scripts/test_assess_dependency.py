@@ -92,6 +92,11 @@ def action_facts() -> Any:
         pytest.param("OFL-1.1", "FAIL", id="on no list"),
         pytest.param("BSD-4-Clause", "FAIL", id="bsd with the advertising clause"),
         pytest.param("LicenseRef-Proprietary", "REVIEW", id="custom licence reference"),
+        pytest.param(
+            "GPL-3.0-only AND LicenseRef-Extra",
+            "FAIL",
+            id="custom licence does not soften a forbidden one",
+        ),
     ],
 )
 def test_licence_expression(expression: str, expected: str) -> None:
@@ -608,3 +613,10 @@ def test_action_advisories_are_queried_under_the_canonical_repository_name() -> 
         )
 
     assert facts.vulnerabilities == ("GHSA-hw6r-g8gj-2987",)
+
+
+def test_release_tag_raises_when_github_refuses_the_tag_listing() -> None:
+    client = _github({"/repos/octo/action/tags": httpx.Response(403, json={})})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        assess_dependency.release_tag(client, repo="octo/action", sha=_CHECKOUT_SHA)

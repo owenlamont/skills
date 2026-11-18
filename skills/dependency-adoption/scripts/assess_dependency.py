@@ -176,6 +176,10 @@ def _licence(verdict: Verdict, detail: str) -> Check:
 
 
 def _symbol_check(key: str) -> Check:
+    if key.startswith("LicenseRef-"):
+        return _licence(
+            Verdict.REVIEW, f"{key} is a custom licence: read its text in the source"
+        )
     if key in PERMISSIVE:
         return _licence(Verdict.PASS, f"{key} is permissive")
     if key.startswith(WEAK_COPYLEFT):
@@ -214,7 +218,9 @@ def _expression_check(expression: str | None) -> Check | None:
     if not expression or len(expression) > MAX_EXPRESSION_LENGTH:
         return None
     try:
-        parsed = get_spdx_licensing().parse(expression, validate=True)
+        parsed = get_spdx_licensing().parse(
+            expression, validate="LicenseRef-" not in expression
+        )
     except ExpressionError:
         return None
     if parsed is None:
@@ -250,12 +256,6 @@ def licence_check(
 
     ``OR`` takes the best option, since we may choose it; ``AND`` takes the worst.
     """
-    if expression and "LicenseRef-" in expression:
-        return _licence(
-            Verdict.REVIEW,
-            f"custom licence `{expression[:80]}`: read the LICENSE file in the source "
-            "repository",
-        )
     found = (
         _expression_check(expression)
         or _classifier_check(classifiers)
@@ -839,7 +839,7 @@ def fetch_action(
             manifest = document if isinstance(document, dict) else {}
             break
     runs = manifest.get("runs") or {}
-    tag = _release_tag(client, repo=repo, sha=sha) or (
+    tag = release_tag(client, repo=repo, sha=sha) or (
         ref if _version(ref) is not None else None
     )
     release = None if tag is None else str(_version(tag))
@@ -877,16 +877,21 @@ def _specificity(version: Version) -> tuple[int, Version]:
     return len(version.release), version
 
 
-def _release_tag(client: httpx.Client, *, repo: str, sha: str | None) -> str | None:
-    """Return the name of the most specific version tag pointing at ``sha``."""
+def release_tag(client: httpx.Client, *, repo: str, sha: str | None) -> str | None:
+    """Return the name of the most specific version tag pointing at ``sha``.
+
+    Raises
+    ------
+    httpx.HTTPStatusError
+        When GitHub refuses the tag listing, so a failed lookup cannot pass the
+        cooldown on the older commit date.
+    """
     if sha is None:
         return None
     tags: dict[str, Version] = {}
     url: str | None = f"{GITHUB_API}/repos/{repo}/tags?per_page={MAX_TAGS_PER_PAGE}"
     while url and not tags:
-        response = client.get(url)
-        if not response.is_success:
-            return None
+        response = client.get(url).raise_for_status()
         tags = {
             tag["name"]: version
             for tag in orjson.loads(response.content)
