@@ -15,6 +15,7 @@
 # ///
 
 from collections.abc import Collection, Iterable, Mapping
+import contextlib
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, UTC
 from enum import IntEnum
@@ -219,15 +220,20 @@ def _node_check(node: Any) -> Check:
     return _licence(Verdict.REVIEW, f"unrecognised licence term {node}")
 
 
+def _parse_expression(expression: str) -> Any:
+    """Parse strict SPDX first, then the licensing library's aliases (``GPL 2.0+``)."""
+    licensing = get_spdx_licensing()
+    with contextlib.suppress(InvalidLicenseExpression, ExpressionError):
+        return licensing.parse(canonicalize_license_expression(expression))
+    with contextlib.suppress(ExpressionError):
+        return licensing.parse(expression, validate=True)
+    return None
+
+
 def _expression_check(expression: str | None) -> Check | None:
     if not expression or len(expression) > MAX_EXPRESSION_LENGTH:
         return None
-    try:
-        canonical = canonicalize_license_expression(expression)
-        parsed = get_spdx_licensing().parse(canonical)
-    except InvalidLicenseExpression, ExpressionError:
-        return None
-    if parsed is None:
+    if (parsed := _parse_expression(expression)) is None:
         return None
     graded = _node_check(parsed)
     return _licence(graded.verdict, f"`{parsed}`: {graded.detail}")
