@@ -57,6 +57,10 @@ _PYPROJECT: Final = _ROOT / "pyproject.toml"
 # script with a shebang and no metadata is still checked -- the undeclared floor this
 # exists to stop.
 _SHEBANG: Final = "uv run --script"
+# Every file directly under a skill's `scripts/` is a standalone script, so one there
+# counts whatever it looks like: a missing block is the state this checks for, and
+# discovering by shape alone would drop that script from the check instead.
+_SCRIPT_DIR_PARTS: Final = ("skills", "scripts")
 # PEP 508's name, and PEP 503's normalisation of it, so `tree_sitter>=0.25` and
 # `Tree-Sitter` both name the straggler `tree-sitter`.
 _NAME: Final = re.compile(r"^\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
@@ -272,6 +276,10 @@ def entry_points() -> list[pathlib.Path]:
         if not path.is_file():
             # Deleted but not yet staged: git still lists it, and reading it would end
             # the check in a traceback during an ordinary delete-then-lint.
+            continue
+        parts = pathlib.PurePosixPath(name).parts
+        if len(parts) == 4 and (parts[0], parts[2]) == _SCRIPT_DIR_PARTS:
+            found.append(path)
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         first = text.split("\n", 1)[0]

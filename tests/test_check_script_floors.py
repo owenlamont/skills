@@ -214,6 +214,15 @@ def test_entry_points_skips_a_module_that_is_not_an_entry_point(
     assert entry_points() == []
 
 
+def test_entry_points_takes_a_skill_script_with_no_metadata(
+    tracked: ScriptFactory,
+) -> None:
+    plain = tracked(body="print(1)\n", name="skills/example/scripts/plain.py")
+    assert entry_points() == [plain]
+    (verdict,) = check([plain], FLOOR)
+    assert not verdict.ok
+
+
 def test_entry_points_skips_an_untracked_script(
     repo: pathlib.Path, script: ScriptFactory
 ) -> None:
