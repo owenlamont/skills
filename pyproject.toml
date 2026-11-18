@@ -2,7 +2,7 @@
 [project]
 name = "skills"
 version = "0"
-requires-python = ">=3.14"
+requires-python = ">=3.15"
 dependencies = [
     "datasketch>=1.6.5",
     "gitpython>=3.1.50",
@@ -25,6 +25,11 @@ dependencies = [
     "tree-sitter-typescript>=0.23.2",
     "typer>=0.26.7",
 ]
+
+[tool.script-floors]
+# tree-sitter 0.26.1 ships no cp315 wheel; its next release builds one.
+held-back = ">=3.14,<3.15"
+stragglers = ["tree-sitter"]
 
 [tool.uv]
 package = false

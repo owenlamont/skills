@@ -22,8 +22,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        # No `python-version`: setup-uv exports it as `UV_PYTHON`, which overrides a
+        # held-back script's own `requires-python` and runs it on the project floor.
         with:
-          python-version: '3.14'
           enable-cache: true
       # `no-commit-to-branch` guards local commits and would fail every push to main.
       - run: uvx prek@0.5.5 run --all-files --show-diff-on-failure

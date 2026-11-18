@@ -1,6 +1,14 @@
 line-length = 88
 indent-width = 4
 
+# A script `pyproject.toml` holds back for a dependency with no wheel on the project's
+# floor runs on the older interpreter, so ruff must not rewrite it with newer syntax.
+[per-file-target-version]
+"skills/dependency-adoption/scripts/adoption_hook.py" = "py314"
+"skills/dependency-adoption/scripts/test_adoption_hook.py" = "py314"
+"skills/dry/scripts/dry.py" = "py314"
+"skills/dry/scripts/test_dry.py" = "py314"
+
 [format]
 quote-style = "double"
 indent-style = "space"
