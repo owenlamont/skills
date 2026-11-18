@@ -17,9 +17,10 @@ environment of its own — so anything that has to import the project's code goe
 `uv run`, not `uvx`:
 
 ```bash
-uv add httpx2       # add a dependency (uv add --dev for dev-only; uv remove to drop)
-uv run pytest       # run a command in the project environment
-uvx ruff check      # run a one-off tool, isolated from the project
+uv add --no-sync --no-build httpx2  # lock a new dependency without running it (--dev for dev-only)
+uv sync --locked                    # install once dependency-adoption's assessment passes
+uv run pytest                       # run a command in the project environment
+uvx ruff check                      # run a one-off tool, isolated from the project
 ```
 
 Reach for `uvx --from <package> <command>` where the console script is named differently
@@ -80,8 +81,8 @@ import httpx2
 ```
 
 ```bash
-uv run script.py                  # runs in an ephemeral env with httpx2
-uv add --script script.py rich    # add a dep to the script's metadata
+uv run script.py                           # runs in an ephemeral env with httpx2
+uv add --no-build --script script.py rich  # add a dep to the script's metadata
 ```
 
 **A `requires-python` in that block does not reach `ruff`.** It sets the interpreter

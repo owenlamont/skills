@@ -46,11 +46,17 @@ _ADD_VERBS: Final = {
     "pnpm": frozenset({"add", "install", "i"}),
     "npm": frozenset({"add", "install", "i"}),
 }
+# Alternative flag sets, any one of which resolves without running package code.
 _LOCK_ONLY: Final = {
-    "uv": frozenset({"--no-sync", "--script"}),
-    "pnpm": frozenset({"--lockfile-only"}),
-    "npm": frozenset({"--package-lock-only"}),
+    "uv": (
+        frozenset({"--no-sync", "--no-build"}),
+        frozenset({"--script", "--no-build"}),
+    ),
+    "pnpm": (frozenset({"--lockfile-only"}),),
+    "npm": (frozenset({"--package-lock-only"}),),
 }
+# Tools where `--no-<flag>` turns `--<flag>` off; uv's `--no-` options stand alone.
+_NEGATABLE: Final = frozenset({"pnpm", "npm"})
 _REQUIREMENTS_FILES: Final = frozenset({"-r", "--requirements"})
 _FALSE_VALUES: Final = frozenset({"false", "0", "no"})
 # Options whose value is the next word, so the value is neither the verb nor a package.
@@ -138,20 +144,43 @@ def _positionals(tool: str, words: list[str]) -> list[str]:
     return positionals
 
 
+def _option_name(tool: str, word: str) -> str:
+    short = word[:2]
+    if not word.startswith("--") and short in _VALUE_OPTIONS.get(tool, frozenset()):
+        return short
+    return word.partition("=")[0]
+
+
+def _enabled_flags(tool: str, words: list[str]) -> frozenset[str]:
+    """Return the options left on once every word is applied in order.
+
+    A later ``--flag=false``, or ``--no-flag`` for npm and pnpm, turns off an earlier
+    ``--flag``.
+    """
+    enabled: dict[str, bool] = {}
+    for word in words:
+        if not word.startswith("-"):
+            continue
+        name = _option_name(tool, word)
+        if tool in _NEGATABLE and name.startswith("--no-"):
+            enabled[f"--{name.removeprefix('--no-')}"] = False
+        else:
+            enabled[name] = word.partition("=")[2].lower() not in _FALSE_VALUES
+    return frozenset(name for name, on in enabled.items() if on)
+
+
 def _as_add(words: list[str]) -> PackageAdd | None:
     if not words:
         return None
     tool = words[0].rsplit("/", maxsplit=1)[-1]
     verb, *packages = _positionals(tool, words[1:]) or [""]
-    options = [word.partition("=") for word in words if word.startswith("-")]
-    flags = {name for name, _, value in options if value.lower() not in _FALSE_VALUES}
+    flags = _enabled_flags(tool, words[1:])
     if verb not in _ADD_VERBS.get(tool, frozenset()):
         return None
     if not packages and not (tool == "uv" and flags & _REQUIREMENTS_FILES):
         return None
-    return PackageAdd(
-        tool=tool, lock_only=bool(_LOCK_ONLY.get(tool, frozenset()) & flags)
-    )
+    lock_only = any(required <= flags for required in _LOCK_ONLY.get(tool, ()))
+    return PackageAdd(tool=tool, lock_only=lock_only)
 
 
 def package_adds(command: str) -> list[PackageAdd]:

@@ -16,9 +16,16 @@ import pytest
     ("command", "expected"),
     [
         pytest.param("uv add httpx", [("uv", False)], id="uv add installs"),
-        pytest.param("uv add --no-sync httpx", [("uv", True)], id="uv lock only"),
         pytest.param(
-            "uv add --script tool.py httpx", [("uv", True)], id="pep 723 script"
+            "uv add --no-sync --no-build httpx", [("uv", True)], id="uv lock only"
+        ),
+        pytest.param(
+            "uv add --no-sync httpx", [("uv", False)], id="uv no-sync alone can build"
+        ),
+        pytest.param(
+            "uv add --no-build --script tool.py httpx",
+            [("uv", True)],
+            id="pep 723 script",
         ),
         pytest.param("cd web && pnpm add -D vite", [("pnpm", False)], id="chained"),
         pytest.param(
@@ -44,7 +51,9 @@ import pytest
             id="filter value is not a package",
         ),
         pytest.param(
-            "uv add --script=tool.py httpx", [("uv", True)], id="script with equals"
+            "uv add --no-build --script=tool.py httpx",
+            [("uv", True)],
+            id="script with equals",
         ),
         pytest.param(
             "env -u VIRTUAL_ENV uv add httpx", [("uv", False)], id="env with options"
@@ -59,6 +68,21 @@ import pytest
             "npm install lodash --package-lock-only=false",
             [("npm", False)],
             id="lock-only flag set false",
+        ),
+        pytest.param(
+            "uv add -rrequirements.txt",
+            [("uv", False)],
+            id="attached requirements file",
+        ),
+        pytest.param(
+            "npm install lodash --package-lock-only --package-lock-only=false",
+            [("npm", False)],
+            id="later flag overrides earlier",
+        ),
+        pytest.param(
+            "npm install lodash --package-lock-only --no-package-lock-only",
+            [("npm", False)],
+            id="npm negated flag",
         ),
     ],
 )

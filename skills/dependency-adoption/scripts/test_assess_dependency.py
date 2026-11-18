@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import assess_dependency
+import httpx2 as httpx
 import orjson
 import pytest
 
@@ -28,6 +29,11 @@ _CHECKOUT_SHA: Final = "11d5960a326750d5838078e36cf38b85af677262"
 
 def _load(name: str) -> Any:
     return orjson.loads((_FIXTURES / name).read_bytes())
+
+
+def _attested_by(repository: str) -> dict[str, Any]:
+    publisher = {"kind": "GitHub", "repository": repository}
+    return {"attestation_bundles": [{"publisher": publisher}]}
 
 
 def _verdicts(checks: list[Any]) -> dict[str, str]:
@@ -84,6 +90,7 @@ def action_facts() -> Any:
             id="exception on forbidden",
         ),
         pytest.param("OFL-1.1", "FAIL", id="on no list"),
+        pytest.param("BSD-4-Clause", "FAIL", id="bsd with the advertising clause"),
         pytest.param("LicenseRef-Proprietary", "REVIEW", id="custom licence reference"),
     ],
 )
@@ -99,6 +106,11 @@ def test_licence_expression(expression: str, expected: str) -> None:
     ("classifiers", "expected"),
     [
         pytest.param(("License :: OSI Approved :: MIT License",), "PASS", id="mit"),
+        pytest.param(
+            ("License :: OSI Approved :: BSD License",),
+            "REVIEW",
+            id="bsd classifier does not say which clauses",
+        ),
         pytest.param(
             ("License :: OSI Approved :: GNU Lesser General Public License v3",),
             "REVIEW",
@@ -281,6 +293,20 @@ def test_sha_pin_must_resolve(
     assert result["pin"] == expected
 
 
+def test_action_release_inside_cooldown_fails_on_an_older_commit(
+    action_facts: Any,
+) -> None:
+    facts = action_facts(
+        committed=_FAR_FUTURE - timedelta(days=30),
+        release="4.1.2",
+        released=_FAR_FUTURE - timedelta(days=1),
+    )
+
+    result = _verdicts(assess_dependency.evaluate_action(facts, _FAR_FUTURE))
+
+    assert result["cooldown"] == "FAIL"
+
+
 def test_action_commit_inside_cooldown_fails(action_facts: Any) -> None:
     facts = action_facts(committed=_FAR_FUTURE - timedelta(days=2))
 
@@ -339,10 +365,21 @@ def test_action_advisory_ranges(version: str, expected: tuple[str, ...]) -> None
     advisory = _load("osv_GHSA-cxww-7g56-2vh6.json")
 
     affecting = assess_dependency.affecting(
-        [advisory], package="actions/download-artifact", version=version
+        [advisory], packages=("actions/download-artifact",), version=version
     )
 
     assert affecting == expected
+
+
+def test_advisory_filed_under_an_action_subpath_url_is_found() -> None:
+    advisory = _load("osv_GHSA-hw6r-g8gj-2987.json")
+    names = assess_dependency.osv_package_names(
+        repo="pytorch/pytorch", path=".github/actions/filter-test-configs"
+    )
+
+    affecting = assess_dependency.affecting([advisory], packages=names, version="2.0.0")
+
+    assert affecting == ("GHSA-hw6r-g8gj-2987",)
 
 
 @pytest.mark.parametrize(
@@ -391,24 +428,35 @@ def test_maintainer_count_excludes_automation(
     ("overrides", "expected"),
     [
         pytest.param(
-            {"publisher": "GitHub:hynek/stamina", "source_repo": "hynek/stamina"},
+            {"publishers": ("GitHub:hynek/stamina",), "source_repo": "hynek/stamina"},
             "PASS",
             id="published from the declared source",
         ),
         pytest.param(
-            {"publisher": "GitHub:someone/stamina", "source_repo": "hynek/stamina"},
+            {"publishers": ("GitHub:someone/stamina",), "source_repo": "hynek/stamina"},
             "FAIL",
             id="published from another owner",
         ),
         pytest.param(
-            {"publisher": "GitHub:numpy/numpy-release", "source_repo": "numpy/numpy"},
+            {
+                "publishers": ("GitHub:example/example-release",),
+                "source_repo": "example/example",
+            },
             "REVIEW",
             id="release repository under the same owner",
         ),
         pytest.param(
-            {"publisher": "GitLab:group/project", "source_repo": None},
+            {"publishers": ("GitLab:group/project",), "source_repo": None},
             "REVIEW",
             id="publisher the script cannot compare",
+        ),
+        pytest.param(
+            {
+                "publishers": ("GitHub:hynek/stamina", "GitHub:someone/stamina"),
+                "source_repo": "hynek/stamina",
+            },
+            "FAIL",
+            id="files disagree and one is under another owner",
         ),
     ],
 )
@@ -438,3 +486,39 @@ def test_github_homepage_counts_as_the_source() -> None:
     )
 
     assert facts.source_url == "https://github.com/tree-sitter/tree-sitter-bash"
+
+
+def test_pypi_publishers_come_from_every_attested_file() -> None:
+    release = _load("pypi_frozendict_2.5.1.json")
+    first, second, _ = (f["filename"] for f in release["urls"])
+    integrity = "/integrity/frozendict/2.5.1"
+    routes = {
+        "/pypi/frozendict/json": _load("pypi_frozendict_project.json"),
+        "/pypi/frozendict/2.5.1/json": release,
+        f"{integrity}/{first}/provenance": _attested_by("hynek/stamina"),
+        f"{integrity}/{second}/provenance": _attested_by("someone/stamina"),
+        "/v1/query": {},
+    }
+    transport = httpx.MockTransport(
+        lambda request: (
+            httpx.Response(200, json=routes[request.url.path])
+            if request.url.path in routes
+            else httpx.Response(httpx.codes.NOT_FOUND)
+        )
+    )
+
+    with httpx.Client(transport=transport) as client:
+        facts = assess_dependency.fetch_pypi(client, name="frozendict", version="2.5.1")
+
+    assert facts.publishers == ("GitHub:hynek/stamina", "GitHub:someone/stamina")
+
+
+def test_skill_names_every_licence_the_script_grades() -> None:
+    skill = (Path(__file__).parents[1] / "SKILL.md").read_text(encoding="utf-8")
+    graded = (
+        assess_dependency.PERMISSIVE
+        | set(assess_dependency.WEAK_COPYLEFT)
+        | set(assess_dependency.FORBIDDEN)
+    )
+
+    assert {name for name in graded if f"`{name}`" not in skill} == set()

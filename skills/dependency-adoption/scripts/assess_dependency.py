@@ -14,7 +14,7 @@
 # exclude-newer = "1 week"
 # ///
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, UTC
 from enum import IntEnum
@@ -75,7 +75,7 @@ PERMISSIVE: Final = frozenset(
     }
 )
 WEAK_COPYLEFT: Final = ("LGPL-", "MPL-", "EPL-", "CDDL-")
-FORBIDDEN: Final = ("GPL-", "AGPL-", "SSPL-", "BUSL-", "CC-BY-NC")
+FORBIDDEN: Final = ("GPL-", "AGPL-", "SSPL-", "BUSL-", "CC-BY-NC-")
 
 
 class Verdict(IntEnum):
@@ -96,7 +96,7 @@ CLASSIFIER_FAMILIES: Final = (
     ("Eclipse Public", Verdict.REVIEW),
     ("General Public License", Verdict.FAIL),
     ("MIT", Verdict.PASS),
-    ("BSD", Verdict.PASS),
+    ("BSD", Verdict.REVIEW),
     ("Apache", Verdict.PASS),
     ("ISC", Verdict.PASS),
     ("Python Software Foundation", Verdict.PASS),
@@ -134,7 +134,7 @@ class PackageFacts:
     sdist_only: bool = False
     provenance: bool | None = None
     previous_provenance: bool | None = None
-    publisher: str | None = None
+    publishers: tuple[str, ...] = ()
     source_url: str | None = None
     source_archived: bool | None = None
     source_repo: str | None = None
@@ -153,6 +153,7 @@ class ActionFacts:
     docker_image: str | None
     licence: str | None
     release: str | None = None
+    released: datetime | None = None
     vulnerabilities: tuple[str, ...] = ()
     nested_uses: tuple[str, ...] = ()
 
@@ -160,7 +161,7 @@ class ActionFacts:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Attestation:
     present: bool | None
-    publisher: str | None = None
+    publishers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -304,15 +305,28 @@ def _provenance_check(facts: PackageFacts) -> Check:
 
 
 def _publisher_check(facts: PackageFacts) -> Check | None:
-    if facts.publisher is None:
+    publishers = tuple(dict.fromkeys(facts.publishers))
+    if not publishers:
         return None
-    kind, _, repository = facts.publisher.partition(":")
     declared = facts.source_repo or github_repo(facts.source_url)
+    checks = [_one_publisher_check(p, declared=declared) for p in publishers]
+    worst = max(checks, key=_by_verdict)
+    if len({p.lower() for p in publishers}) == 1:
+        return worst
+    return replace(
+        worst,
+        detail=f"files attest different publishers ({', '.join(publishers)}); "
+        f"worst: {worst.detail}",
+    )
+
+
+def _one_publisher_check(publisher: str, *, declared: str | None) -> Check:
+    kind, _, repository = publisher.partition(":")
     if kind != "GitHub" or declared is None:
         return Check(
             name="publisher",
             verdict=Verdict.REVIEW,
-            detail=f"published from {facts.publisher}; confirm it is the project's "
+            detail=f"published from {publisher}; confirm it is the project's "
             "own repository",
         )
     if repository.lower() == declared.lower():
@@ -477,6 +491,25 @@ def _execution_check(facts: ActionFacts) -> Check:
     return Check(name="execution", verdict=Verdict.INFO, detail=facts.runs_using)
 
 
+def _action_cooldown_check(facts: ActionFacts, now: datetime) -> Check:
+    """Grade the release or tag date where one exists, else the commit date."""
+    if facts.released is None:
+        return _commit_cooldown_check(facts.committed, now)
+    age = _age(since=facts.released, now=now)
+    if now - facts.released < COOLDOWN:
+        return Check(
+            name="cooldown",
+            verdict=Verdict.FAIL,
+            detail=f"{facts.release} released {age} ago, inside the "
+            f"{COOLDOWN.days}-day cooldown",
+        )
+    return Check(
+        name="cooldown",
+        verdict=Verdict.PASS,
+        detail=f"{facts.release} released {age} ago",
+    )
+
+
 def _commit_cooldown_check(committed: datetime | None, now: datetime) -> Check:
     if committed is None:
         return Check(
@@ -543,7 +576,7 @@ def evaluate_action(facts: ActionFacts, now: datetime) -> list[Check]:
                 detail=f"`{facts.ref}` is mutable: use `{target}@{sha} # {facts.ref}`",
             )
         )
-    checks.append(_commit_cooldown_check(facts.committed, now))
+    checks.append(_action_cooldown_check(facts, now))
     checks.append(_action_advisory_check(facts))
     if facts.archived:
         checks.append(
@@ -615,7 +648,7 @@ def parse_pypi(
         yanked=bool(files) and all(f.get("yanked") for f in files),
         sdist_only=bool(files) and all(f["packagetype"] == "sdist" for f in files),
         provenance=attestation.present,
-        publisher=attestation.publisher,
+        publishers=attestation.publishers,
         previous_provenance=previous_provenance,
         source_url=source,
         vulnerabilities=vulnerabilities,
@@ -702,12 +735,14 @@ def _publisher(bundle: Mapping[str, Any]) -> str | None:
 def _pypi_attestation(
     client: httpx.Client, *, name: str, version: str, files: list[Mapping[str, Any]]
 ) -> Attestation:
-    """Report whether any file of the release is attested, and who published it.
+    """Report whether any file of the release is attested, and every publisher named.
 
-    ``publisher`` is ``<kind>:<repository>``, e.g. ``GitHub:hynek/stamina``.
+    Each publisher is ``<kind>:<repository>``, e.g. ``GitHub:hynek/stamina``.
     """
     if not files:
         return Attestation(present=None)
+    present = False
+    publishers: dict[str, None] = {}
     for file in files:
         response = client.get(
             f"https://pypi.org/integrity/{name}/{version}/{file['filename']}/provenance"
@@ -715,12 +750,10 @@ def _pypi_attestation(
         if response.status_code == httpx.codes.NOT_FOUND:
             continue
         response.raise_for_status()
+        present = True
         bundles = orjson.loads(response.content).get("attestation_bundles", [])
-        publishers = [p for b in bundles if (p := _publisher(b))]
-        return Attestation(
-            present=True, publisher=publishers[0] if publishers else None
-        )
-    return Attestation(present=False)
+        publishers |= dict.fromkeys(p for b in bundles if (p := _publisher(b)))
+    return Attestation(present=present, publishers=tuple(publishers))
 
 
 def fetch_pypi(client: httpx.Client, *, name: str, version: str | None) -> PackageFacts:
@@ -799,10 +832,10 @@ def fetch_action(
             manifest = document if isinstance(document, dict) else {}
             break
     runs = manifest.get("runs") or {}
-    tagged = _version(ref)
-    release = _release_tag(client, repo=repo, sha=sha) or (
-        None if tagged is None else str(tagged)
+    tag = _release_tag(client, repo=repo, sha=sha) or (
+        ref if _version(ref) is not None else None
     )
+    release = None if tag is None else str(_version(tag))
     return ActionFacts(
         reference=reference,
         repo=repo,
@@ -818,7 +851,10 @@ def fetch_action(
         docker_image=runs.get("image") if runs.get("using") == "docker" else None,
         licence=(meta.get("license") or {}).get("spdx_id"),
         release=release,
-        vulnerabilities=_action_vulnerabilities(osv, repo=repo, release=release),
+        released=None if tag is None else _tag_date(client, repo=repo, tag=tag),
+        vulnerabilities=_action_vulnerabilities(
+            osv, packages=osv_package_names(repo=repo, path=path), release=release
+        ),
         nested_uses=_workflow_uses(manifest) if workflow else _step_uses(runs),
     )
 
@@ -835,24 +871,44 @@ def _specificity(version: Version) -> tuple[int, Version]:
 
 
 def _release_tag(client: httpx.Client, *, repo: str, sha: str | None) -> str | None:
-    """Return the most specific version tag pointing at ``sha``, without its ``v``."""
+    """Return the name of the most specific version tag pointing at ``sha``."""
     if sha is None:
         return None
-    versions: list[Version] = []
+    tags: dict[str, Version] = {}
     url: str | None = f"{GITHUB_API}/repos/{repo}/tags?per_page={MAX_TAGS_PER_PAGE}"
-    while url and not versions:
+    while url and not tags:
         response = client.get(url)
         if not response.is_success:
             return None
-        versions = [
-            version
+        tags = {
+            tag["name"]: version
             for tag in orjson.loads(response.content)
             if tag["commit"]["sha"] == sha and (version := _version(tag["name"]))
-        ]
+        }
         url = response.links.get("next", {}).get("url")
-    if not versions:
+    if not tags:
         return None
-    return str(max(versions, key=_specificity))
+    return max(tags, key=lambda name: _specificity(tags[name]))
+
+
+def _tag_date(client: httpx.Client, *, repo: str, tag: str) -> datetime | None:
+    """Return when ``tag`` was published: its release, else its annotation.
+
+    ``None`` for a lightweight tag with no release, which leaves the commit date.
+    """
+    release = client.get(f"{GITHUB_API}/repos/{repo}/releases/tags/{tag}")
+    if release.is_success:
+        return _timestamp(orjson.loads(release.content).get("published_at"))
+    ref = client.get(f"{GITHUB_API}/repos/{repo}/git/ref/tags/{tag}")
+    if not ref.is_success:
+        return None
+    target = orjson.loads(ref.content).get("object", {})
+    if target.get("type") != "tag":
+        return None
+    annotation = client.get(f"{GITHUB_API}/repos/{repo}/git/tags/{target['sha']}")
+    if not annotation.is_success:
+        return None
+    return _timestamp(orjson.loads(annotation.content).get("tagger", {}).get("date"))
 
 
 def _in_range(version: Version, events: Iterable[Mapping[str, str]]) -> bool:
@@ -868,22 +924,34 @@ def _in_range(version: Version, events: Iterable[Mapping[str, str]]) -> bool:
     return affected
 
 
+def osv_package_names(*, repo: str, path: str) -> tuple[str, ...]:
+    """Return every name OSV may file an Action's advisories under.
+
+    Advisories name the repository, or the full URL of an action in a subdirectory.
+    """
+    targets = (repo, f"{repo}/{path}") if path else (repo,)
+    return tuple(
+        name for target in targets for name in (target, f"https://github.com/{target}")
+    )
+
+
 def affecting(
-    advisories: Iterable[Mapping[str, Any]], *, package: str, version: str
+    advisories: Iterable[Mapping[str, Any]], *, packages: Collection[str], version: str
 ) -> tuple[str, ...]:
     """Return the ids of advisories whose ECOSYSTEM ranges cover ``version``.
 
     OSV does not match versions for the GitHub Actions ecosystem, so ranges are
     evaluated here.
     """
+    names = {package.lower() for package in packages}
     parsed = Version(version)
     return tuple(
         advisory["id"]
         for advisory in advisories
         if any(
-            affected["package"]["name"].lower() == package.lower()
+            affected["package"]["name"].lower() in names
             and (
-                version in affected.get("versions", [])
+                version in (affected.get("versions") or [])
                 or any(
                     _in_range(parsed, r["events"])
                     for r in affected.get("ranges", [])
@@ -896,16 +964,20 @@ def affecting(
 
 
 def _action_vulnerabilities(
-    client: httpx.Client, *, repo: str, release: str | None
+    client: httpx.Client, *, packages: tuple[str, ...], release: str | None
 ) -> tuple[str, ...]:
     if release is None:
         return ()
-    response = client.post(
-        OSV_QUERY, json={"package": {"name": repo, "ecosystem": "GitHub Actions"}}
-    )
-    response.raise_for_status()
-    advisories = orjson.loads(response.content).get("vulns", [])
-    return affecting(advisories, package=repo, version=release)
+    advisories: dict[str, Mapping[str, Any]] = {}
+    for package in packages:
+        response = client.post(
+            OSV_QUERY,
+            json={"package": {"name": package, "ecosystem": "GitHub Actions"}},
+        )
+        response.raise_for_status()
+        for advisory in orjson.loads(response.content).get("vulns", []):
+            advisories[advisory["id"]] = advisory
+    return affecting(advisories.values(), packages=packages, version=release)
 
 
 def _step_uses(container: Mapping[Any, Any]) -> tuple[str, ...]:
@@ -949,12 +1021,12 @@ def with_source_archive(github: httpx.Client, facts: PackageFacts) -> PackageFac
         facts,
         source_archived=bool(meta.get("archived")),
         source_repo=meta.get("full_name"),
-        publisher=_canonical_publisher(github, facts.publisher),
+        publishers=tuple(_canonical_publisher(github, p) for p in facts.publishers),
     )
 
 
-def _canonical_publisher(github: httpx.Client, publisher: str | None) -> str | None:
-    kind, _, repository = (publisher or "").partition(":")
+def _canonical_publisher(github: httpx.Client, publisher: str) -> str:
+    kind, _, repository = publisher.partition(":")
     if kind != "GitHub":
         return publisher
     response = github.get(f"{GITHUB_API}/repos/{repository}")

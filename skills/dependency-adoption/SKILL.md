@@ -37,8 +37,9 @@ bundled script collects the facts, you write the judgement, and both go in the P
 ## Collect the evidence record
 
 The script covers PyPI, npm and GitHub Actions, reusable workflows included. **Lock
-before you install, so no unreviewed code runs:** `uv add --no-sync --no-build <name>`
-or `pnpm add --lockfile-only <name>`, then assess the version the lockfile resolved, and
+before you install, so no unreviewed code runs:** `uv add --no-sync --no-build <name>`,
+`uv add --no-build --script <file> <name>` for a PEP 723 script, or
+`pnpm add --lockfile-only <name>`, then assess the version the lockfile resolved, and
 install only once it passes. Paste the output into the PR body; the output is a
 collapsed `<details>` table, so the visible body carries only your judgement lines:
 
@@ -52,8 +53,10 @@ GH_TOKEN=$(gh auth token) uv run --script <skill-dir>/scripts/assess_dependency.
   approved (see *Exceptions*). The exit status is 1 when anything fails.
 - **`review` needs a sentence in the PR** saying what you checked and why it is
   acceptable.
-- **`uv add --no-build` failing for want of a wheel means resolving would run the
-  package's build backend.** Read its source before locking without `--no-build`.
+- **`--no-build` keeps non-editable registry packages from running code**, and fails
+  rather than build one that ships no wheel. A local, editable or Git dependency is
+  source to review before resolving: `--no-build` refuses one with dynamic metadata,
+  and resolving it without the flag runs its build backend.
 - **The licence row grades code as bundled.** Ignore it for a tool run as a separate
   process; for weak copyleft that ships to a browser or a customer, its `review` is a
   `fail` until an exception is approved.
@@ -84,24 +87,30 @@ GH_TOKEN=$(gh auth token) uv run --script <skill-dir>/scripts/assess_dependency.
 ## Licences
 
 - **These lists are a default for code distributed under a permissive or proprietary
-  licence.** Where your organisation has a licence policy, it wins: change the lists
-  here and `assess_dependency.py`'s `PERMISSIVE`, `WEAK_COPYLEFT` and `FORBIDDEN`
+  licence.** They are exactly `assess_dependency.py`'s `PERMISSIVE`, `WEAK_COPYLEFT`
+  and `FORBIDDEN`. Where your organisation has a licence policy, it wins: change both
   together.
 - **The licence gate covers code imported, linked or bundled into what you build and
   ship.** A tool executed as a separate process — a CLI, an Action, a prek hook, a
   base image's userland, Terraform itself — is outside it.
-- **Permissive** (MIT, BSD, ISC, Apache-2.0, PSF, Zlib, 0BSD, Unlicense, CC0): allowed.
+- **Permissive** — `0BSD`, `Apache-2.0`, `BlueOak-1.0.0`, `BSD-2-Clause`,
+  `BSD-3-Clause`, `BSL-1.0`, `CC0-1.0`, `HPND`, `ISC`, `MIT`, `MIT-0`, `PSF-2.0`,
+  `Python-2.0`, `Unicode-3.0`, `Unicode-DFS-2016`, `Unlicense`, `X11`, `Zlib`: allowed.
   Code that ships to a browser or a customer needs its notices shipped with it — a
   generated third-party licences file, linked from the app.
-- **Weak copyleft** (LGPL, MPL, EPL): allowed in code that never ships to a browser or
-  a customer. Code that does ships only with an approved exception.
-- **Forbidden, with no exception:** GPL, AGPL, SSPL, BUSL, any non-commercial
-  licence, and no licence at all.
-- **Anything else** — a licence on none of these lists, or a forbidden one `WITH` an
-  exception — needs an approved exception.
+- **Weak copyleft** — any `LGPL-`, `MPL-`, `EPL-` or `CDDL-` identifier: allowed in
+  code that never ships to a browser or a customer. Code that does ships only with an
+  approved exception.
+- **Forbidden, with no exception:** any `GPL-`, `AGPL-`, `SSPL-`, `BUSL-` or
+  `CC-BY-NC-` identifier, any other non-commercial licence, and no licence at all.
+- **Anything else** — a licence on none of these lists, `BSD-4-Clause` among them, or
+  a forbidden one `WITH` an exception — needs an approved exception.
+- **A trove classifier names a family, not a licence.** A `BSD License` classifier is
+  a review until the LICENSE file shows which clauses apply.
 - **Read an expression, not a word:** `OR` lets you choose, so `MIT OR GPL-2.0` is
   allowed under MIT; `AND` binds you to all, so `MIT AND LGPL-3.0` is weak copyleft.
-- **Missing or free-text registry metadata is not a verdict.** Read the LICENSE file
+- **Missing or free-text registry metadata, or a `LicenseRef-` identifier, is not a
+  verdict.** Read the LICENSE file
   in the source repository at the adopted tag, quote its first line in the PR, and
   apply the lists above to it.
 
@@ -128,7 +137,8 @@ Write one line for each that applies. None is a reason to reject alone.
 - **PyPI project:** a `uv.lock` committed and checked with `uv sync --locked`;
   `[tool.uv] exclude-newer = "1 week"` in `pyproject.toml`.
 - **PEP 723 script:** the same `[tool.uv] exclude-newer = "1 week"` inside the
-  script's metadata block; no lockfile is required.
+  script's metadata block. Once a script dependency has been assessed, lock it with
+  `uv lock --no-build --script <file>` and commit the `<file>.lock` it writes.
 - **npm/pnpm:** `pnpm-lock.yaml` committed and installed with `--frozen-lockfile`;
   `minimumReleaseAge: 10080` (minutes) and `trustPolicy: no-downgrade` in
   `pnpm-workspace.yaml`.
