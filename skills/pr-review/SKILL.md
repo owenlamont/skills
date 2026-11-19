@@ -230,7 +230,7 @@ budgeted. Diff contents drive the rest:
 | SQL, a schema or migration, or a query built in code | `sql-data-modelling` |
 | hand-rolled Python helpers, or a new Python dependency | `python-libraries` |
 | Python dependency or version changes | `python-uv-workflow` |
-| a new dependency in any ecosystem, or a new or changed `uses:`, `FROM`, hook `rev`, Terraform module or provider, or installer command | `dependency-adoption` |
+| a new dependency in any ecosystem, or a new or changed `uses:`, `FROM`, hook `rev`, Terraform module or provider, or installer command | `dependency-adoption`, if installed |
 | prek hook or Python lint/format config, or a linter failure outside TypeScript | `python-lint-format` |
 | a marimo or Jupyter notebook | the marimo skills, if installed |
 

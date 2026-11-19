@@ -9,7 +9,6 @@ Engineering skills for coding agents, in the
 | `docs` | Issue and PR bodies, review comments, commit messages, code comments |
 | `pr-review` | End-to-end review of a PR or branch |
 | `dry` | Finding deletable duplicated or hand-rolled Python |
-| `dependency-adoption` | Gating a new third-party dependency, and the PR evidence for it |
 | `python-async` | asyncio |
 | `python-code-style` | Python style, typing, docstrings |
 | `python-datetime` | Dates, times and timezones |
