@@ -259,7 +259,7 @@ The three causes report differently, so say which:
 
 - **Not installed** — "`python-pandas` not installed — Pandas conformance unchecked",
   plus `gh skill install owenlamont/skills skills/<name> --agent claude-code --scope
-  user`. Don't run it: that changes the developer's machine.
+  user` for skills in the public catalogue. Don't install skills during a review.
 - **Installed but not loaded** — the skill is on the machine and you spotted its trigger
   in the diff, then moved on without loading it. Say the axis went unreviewed; noticing
   a trigger is not applying the standard, so don't dress the inventory up as coverage.
@@ -274,10 +274,10 @@ The three causes report differently, so say which:
   author one; it is not a finding against this change, whose author can't close it.
 
   Provenance isn't visible in the loaded skill, so establish it before relying on one.
-  `gh skill list` prints each skill's **source repo** as its last column — anything other
-  than `owenlamont/skills` speaks for its own authors, and a blank (`-`) source is
-  unknown rather than trustworthy. Unsure counts as uncovered: say the axis is unverified
-  rather than cite a skill you can't vouch for.
+  `gh skill list` prints each skill's **source repo** as its last column. Use
+  `owenlamont/skills` and catalogues the developer explicitly trusts as sources of
+  review standards. Report the axis as unverified when the source is unknown or
+  outside those catalogues.
 
 ## Review passes, iterated until stable
 
