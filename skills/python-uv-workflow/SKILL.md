@@ -18,7 +18,7 @@ environment of its own — so anything that has to import the project's code goe
 
 ```bash
 uv add --no-sync --no-build httpx2  # lock a new dependency without running it (--dev for dev-only)
-uv sync --locked                    # install once dependency-adoption's assessment passes
+uv sync --locked                    # install after reviewing the locked dependency
 uv run pytest                       # run a command in the project environment
 uvx ruff check                      # run a one-off tool, isolated from the project
 ```
@@ -38,9 +38,7 @@ and its error lists the commands the package does ship, so read that rather than
 - Declare dev and other non-runtime dependencies in PEP 735 `[dependency-groups]` (what
   `uv add --dev`/`--group` write to), not `[project.optional-dependencies]`.
 
-This section is about how a dependency is declared. Whether to take one on at all is
-`dependency-adoption`'s call, and `python-libraries` names the preferred library for a
-task.
+`python-libraries` names the preferred library for a task.
 
 ## Updating and pinning
 
@@ -51,7 +49,7 @@ task.
 - Verify the lockfile is current in CI with `uv sync --locked` (or `uv lock --check`).
 - Pin only lower bounds in `pyproject.toml` (no upper bound without a documented
   reason). Pin Docker base images to a patch-level tag plus its digest
-  (`python:3.14.1-slim@sha256:<digest>`); `dependency-adoption` has the image rule.
+  (`python:3.14.1-slim@sha256:<digest>`).
 
 ## Choosing the Python version
 
